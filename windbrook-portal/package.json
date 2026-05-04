@@ -1,0 +1,52 @@
+{
+  "name": "windbrook-portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Windbrook Solutions Client Report Portal — generates pixel-faithful SACS and TCC reports.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n css,server -c magenta,cyan \"pnpm css:watch\" \"pnpm server:dev\"",
+    "server:dev": "tsx watch src/server.ts",
+    "css:build": "tailwindcss -i ./src/styles/app.css -o ./public/css/app.css --minify",
+    "css:watch": "tailwindcss -i ./src/styles/app.css -o ./public/css/app.css --watch",
+    "build": "pnpm css:build && tsc -p tsconfig.json --noEmit",
+    "start": "node --import tsx src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:seed:synthetic": "tsx src/db/seed-synthetic.ts",
+    "db:studio": "drizzle-kit studio",
+    "db:migrate:phase22": "tsx src/db/migrations/phase22-clear-tcc-layouts.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "better-auth": "^1.1.10",
+    "better-sqlite3": "^11.7.0",
+    "date-fns": "^4.1.0",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.38.3",
+    "hono": "^4.6.14",
+    "playwright": "^1.49.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "concurrently": "^9.1.2",
+    "drizzle-kit": "^0.30.1",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
