@@ -32,36 +32,22 @@ RUN pnpm typecheck
 FROM base AS runtime
 WORKDIR /app
 
-# Chromium runtime libraries — Playwright needs these for headless PDF export.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium \
-    fonts-liberation \
-    libnss3 \
-    libxss1 \
-    libasound2 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libxkbcommon0 \
-    ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
-
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-
 # Copy production deps + built CSS from earlier stages, then the source
 # from the windbrook-portal/ subdirectory.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/public/css ./public/css
 COPY windbrook-portal/ ./
+
+# Playwright chromium — install in the runtime stage so the browser binary
+# lands at the path Playwright's launch() looks at by default
+# (/root/.cache/ms-playwright/...). `--with-deps` pulls every shared
+# library chromium needs (libnss3 / libatk / libcups / fonts / etc.) so
+# we don't have to enumerate them here. Production-stage install is the
+# preferred fix because pdf.ts calls chromium.launch() with NO
+# executablePath — it relies on the default browser-cache lookup. An
+# apt-get system chromium would only work if pdf.ts passed
+# executablePath: '/usr/bin/chromium' explicitly.
+RUN npx --yes playwright install --with-deps chromium
 
 # Volume mount path — Railway must attach a Volume to /app/data via the
 # dashboard (Service → Settings → Volumes → Mount Path = /app/data).

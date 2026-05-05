@@ -26,36 +26,23 @@ RUN pnpm typecheck
 FROM base AS runtime
 WORKDIR /app
 
-# Chromium runtime libraries — Playwright needs these for headless PDF export.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium \
-    fonts-liberation \
-    libnss3 \
-    libxss1 \
-    libasound2 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libxkbcommon0 \
-    ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
-
-# Tell Playwright to use the system chromium (no separate ~280 MB download).
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-
 # Copy production deps + built assets.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/public/css ./public/css
 COPY . .
+
+# Playwright chromium installed in the RUNTIME stage so the browser binary
+# lands at the path Playwright's chromium.launch() looks at by default
+# (/root/.cache/ms-playwright/...). `--with-deps` pulls all the shared
+# libraries chromium needs (libnss3 / libatk / libcups / fonts / etc.) so
+# we don't enumerate them here.
+#
+# pdf.ts calls chromium.launch() with no executablePath, so it relies on
+# Playwright's default browser-cache lookup. Setting an apt-get system
+# chromium via PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH (an env var that does
+# not actually exist in Playwright) was a no-op — that's why the previous
+# image had chromium installed but pdf.ts couldn't find it.
+RUN npx --yes playwright install --with-deps chromium
 
 # Volume mount target for SQLite + PDFs. Railway must attach a Volume to
 # /app/data via the dashboard (Service → Settings → Volumes → Mount Path =
