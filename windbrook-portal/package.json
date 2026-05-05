@@ -13,7 +13,7 @@
     "css:build": "tailwindcss -i ./src/styles/app.css -o ./public/css/app.css --minify",
     "css:watch": "tailwindcss -i ./src/styles/app.css -o ./public/css/app.css --watch",
     "build": "pnpm css:build && tsc -p tsconfig.json --noEmit",
-    "start": "node --import tsx src/server.ts",
+    "start": "tsx src/db/migrate.ts && node --import tsx src/server.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
