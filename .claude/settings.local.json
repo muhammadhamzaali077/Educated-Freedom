@@ -133,7 +133,8 @@
       "Bash(git update-ref *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git ls-tree *)"
+      "Bash(git ls-tree *)",
+      "Bash(ENABLE_SYNTHETIC_SEED=1 pnpm exec tsx src/db/seed-synthetic.ts)"
     ]
   }
 }
