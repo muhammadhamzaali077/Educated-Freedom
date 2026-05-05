@@ -669,6 +669,70 @@ If the self-check prints `✗ unreachable`, another process is on the port or th
 
 ---
 
+## 15. Deployment (Railway)
+
+The portal ships as a single Docker image. Railway picks up `Dockerfile`
+(declared in `railway.json`), builds, and runs `pnpm start`.
+
+### Persistent storage
+
+SQLite + generated PDFs live under `/app/data` inside the container.
+Railway must attach a **Volume** to the service with mount path **`/app/data`**.
+Without this, every redeploy resets the database and previous reports are
+lost. Railway → service → Settings → Volumes → confirm Mount Path is
+`/app/data`.
+
+### Required env vars
+
+| Var | Example | Notes |
+|---|---|---|
+| `DATABASE_URL` | `file:/app/data/portal.db` | Absolute path inside the volume mount. Default `file:./data/portal.db` resolves to `/app/data/portal.db` because `WORKDIR /app`. If your volume mounts at a different path (e.g. `/data`), set this explicitly to that path + `/portal.db`. |
+| `PORT` | `3000` | Container EXPOSE'd at 3000. |
+| `NODE_ENV` | `production` | Set in Dockerfile. |
+| `BETTER_AUTH_SECRET` | (`openssl rand -base64 32`) | Required. |
+| `BETTER_AUTH_URL` | `https://portal.windbrook.app` | Production hostname (HTTPS). |
+| `CANVA_CLIENT_ID` | (from Canva portal) | Optional unless Canva is connected. |
+| `CANVA_CLIENT_SECRET` | (from Canva portal) | Optional. |
+| `CANVA_REDIRECT_URI` | `https://portal.windbrook.app/api/canva/callback` | Must match the Canva developer-portal Authorized Redirect URL byte-for-byte. |
+
+### Migrations on boot
+
+`package.json` `start` runs the migration runner before the server:
+
+```
+"start": "tsx src/db/migrate.ts && node --import tsx src/server.ts"
+```
+
+`src/db/migrate.ts` calls drizzle's `migrate()` against `src/db/migrations/`.
+Idempotent — the `__drizzle_migrations` tracking table inside the SQLite
+DB skips already-applied SQL files. On a fresh volume, the migrations
+create the schema; on a redeploy with the volume retained, only NEW
+migrations apply.
+
+If a migration fails (column conflict, etc.), the start script exits 1
+and Railway's healthcheck-on-`/healthz` will keep failing. The `[migrate]
+✗ migrations FAILED:` block in the logs has the exact SQL error.
+
+### `SQLITE_CANTOPEN` on first deploy
+
+Both `src/db/client.ts` and `src/db/migrate.ts` call
+`mkdirSync(dirname(dbPath), { recursive: true })` before
+`new Database(...)`. better-sqlite3 raises `SQLITE_CANTOPEN` if the
+parent directory doesn't exist; the mkdir is idempotent and cheap.
+Without it, the first deploy onto a fresh empty volume crashes.
+
+### Production-codebase note
+
+The `aw-portal@1.0.0` log line in earlier production traces (`> node
+dist/index.js`) is **not** this repo's `windbrook-portal/`. If a Railway
+service is currently deploying from a different source, point it at this
+repo (`muhammadhamzaali077/Educated-Freedom`, root `windbrook-portal/`)
+or merge the fixes from this directory into whatever source is wired up.
+The `windbrook-portal/` codebase ships source + runs via `tsx`; there is
+no `dist/` build step.
+
+---
+
 ## Reference Index
 
 - `docs/references/PRD-andrew-windham.md` — full PRD, source of truth for scope.

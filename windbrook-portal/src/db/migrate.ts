@@ -16,6 +16,7 @@
  * `SqliteError: no such column: primary_monthly_inflow` on the first query.
  */
 import 'dotenv/config';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
@@ -23,7 +24,8 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
 const url = process.env.DATABASE_URL ?? 'file:./data/portal.db';
-const dbPath = url.replace(/^file:/, '');
+const rawPath = url.replace(/^file:/, '');
+const dbPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rawPath);
 
 // Migrations live next to this file under `src/db/migrations/`. Resolve via
 // import.meta.url so it works whether invoked via tsx (source) or after a
@@ -33,6 +35,10 @@ const migrationsFolder = path.join(here, 'migrations');
 
 console.log('[migrate] db path:           ', dbPath);
 console.log('[migrate] migrations folder: ', migrationsFolder);
+
+// Production fix — see comment in src/db/client.ts. Railway mounts the
+// volume but the parent dir may not exist on first deploy.
+mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const sqlite = new Database(dbPath);
 sqlite.pragma('journal_mode = WAL');
