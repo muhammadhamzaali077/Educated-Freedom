@@ -132,7 +132,8 @@
       "Bash(git gc *)",
       "Bash(git update-ref *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git ls-tree *)"
     ]
   }
 }
