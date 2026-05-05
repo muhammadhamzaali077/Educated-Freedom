@@ -694,14 +694,23 @@ lost. Railway → service → Settings → Volumes → confirm Mount Path is
 | `CANVA_CLIENT_ID` | (from Canva portal) | Optional unless Canva is connected. |
 | `CANVA_CLIENT_SECRET` | (from Canva portal) | Optional. |
 | `CANVA_REDIRECT_URI` | `https://portal.windbrook.app/api/canva/callback` | Must match the Canva developer-portal Authorized Redirect URL byte-for-byte. |
+| `WINDBROOK_SEED_PASSWORD` | (any 16+ char string) | Seed password for the 3 internal users. Falls back to `WindbrookDev2026!` with a loud warning when unset — fine for prototype, **set this before V1**. |
+| `ENABLE_SYNTHETIC_SEED` | `1` to enable | Populates Cole / Lipski / Park-Rivera with 4 quarters of report history for the prototype walkthrough. **Remove this var (or set anything ≠ 1) before V1 production handover** so customer environments don't get demo data. Idempotent regardless — re-runs after the first one are no-ops. |
 
-### Migrations on boot
+### Boot sequence
 
-`package.json` `start` runs the migration runner before the server:
+`package.json` `start` chains four steps in order:
 
 ```
-"start": "tsx src/db/migrate.ts && node --import tsx src/server.ts"
+"start": "tsx src/db/migrate.ts && tsx src/db/seed.ts && tsx src/db/seed-synthetic.ts && node --import tsx src/server.ts"
 ```
+
+1. **`migrate`** — drizzle's `migrate()` against `src/db/migrations/`. Creates / updates schema. No-op when up to date.
+2. **`seed`** — inserts the three internal users (Andrew / Rebecca / Maryann). Idempotent (existing-by-email check). Reads `WINDBROOK_SEED_PASSWORD` with `WindbrookDev2026!` fallback.
+3. **`seed-synthetic`** — gated on `ENABLE_SYNTHETIC_SEED=1`. With the flag unset, prints `[seed:synthetic] ENABLE_SYNTHETIC_SEED != 1, skipping` and exits in <1 ms. With the flag set, checks `clientExists('Cole Household')` etc. — if any household already exists, prints `data already present, skipping`. Otherwise inserts the three demo households + 4 quarters of SACS/TCC reports each.
+4. **`server`** — boots Hono + chromium pre-warm.
+
+Each step exits 1 on failure, blocking the next. The healthcheck-on-`/healthz` keeps Railway in restart loop until the boot completes.
 
 `src/db/migrate.ts` calls drizzle's `migrate()` against `src/db/migrations/`.
 Idempotent — the `__drizzle_migrations` tracking table inside the SQLite

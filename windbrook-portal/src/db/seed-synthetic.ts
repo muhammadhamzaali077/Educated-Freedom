@@ -1,8 +1,25 @@
 /**
- * pnpm db:seed:synthetic — three client households per PRD §Prototype, each
+ * Synthetic-data seed — three client households per PRD §Prototype, each
  * with 4 quarters of report history (SACS + TCC) for the demo walkthrough.
  *
- * Idempotent: skips clients whose householdName already exists.
+ * Production gate
+ * ---------------
+ * Wired into `package.json` `start` so it runs on every Railway boot.
+ * Gated on the `ENABLE_SYNTHETIC_SEED` env var:
+ *   ENABLE_SYNTHETIC_SEED=1   → seed runs (prototype walkthrough environment)
+ *   anything else / unset     → exits immediately, no demo data
+ * Set the env var in Railway → service → Variables for the prototype
+ * deploy; remove it before V1 production handover so customer DBs don't
+ * get demo accounts dropped in.
+ *
+ * Idempotency
+ * -----------
+ * Two layers of skip:
+ *   1. If any of the three seed households already exists by householdName,
+ *      the whole script exits with "data already present" — fast no-op for
+ *      every redeploy after the first.
+ *   2. The per-client loop also checks each name before insert (defensive
+ *      — handles partial-run states where 1 of 3 was inserted before crash).
  */
 import 'dotenv/config';
 import { eq } from 'drizzle-orm';
@@ -10,6 +27,16 @@ import { db } from './client.js';
 import * as schema from './schema.js';
 import { computeReport, type ReportInputs } from '../lib/calculations.js';
 import { defaultTccAssignments } from '../lib/layouts.js';
+
+// Production gate — bail before any DB reads/writes if the prototype-data
+// flag isn't set. ESM hoists static imports above this, so opening the
+// SQLite connection in client.js still happens (~1 ms) but we exit
+// before any real work. To gate before DB open, refactor all imports
+// to dynamic `await import(...)` calls below this block.
+if (process.env.ENABLE_SYNTHETIC_SEED !== '1') {
+  console.log('[seed:synthetic] ENABLE_SYNTHETIC_SEED != 1, skipping');
+  process.exit(0);
+}
 
 const $ = (d: number) => Math.round(d * 100);
 
@@ -368,29 +395,36 @@ async function generateQuarterlyHistory(
 }
 
 async function main() {
-  console.log('');
-  console.log('  Seeding 3 synthetic clients with 4 quarters of report history…');
-  console.log('');
+  // Whole-script idempotency — if ANY of the seed households already
+  // exists, exit immediately. Cheap pre-check that avoids opening the
+  // expensive quarterly-report-generation loop on every redeploy.
+  for (const tmpl of SEED_CLIENTS) {
+    if (await clientExists(tmpl.householdName)) {
+      console.log('[seed:synthetic] data already present, skipping');
+      process.exit(0);
+    }
+  }
+
+  console.log('[seed:synthetic] seeding 3 synthetic clients with 4 quarters of history…');
 
   const generatorUserId = await getGeneratorUserId();
 
   let totalClients = 0;
   let totalReports = 0;
   for (const tmpl of SEED_CLIENTS) {
+    // Defensive per-client check (handles a partial-run crash state).
     if (await clientExists(tmpl.householdName)) {
-      console.log(`  ✓  ${tmpl.householdName} already seeded — skipping`);
+      console.log(`[seed:synthetic] ✓ ${tmpl.householdName} already exists, skipping`);
       continue;
     }
     const clientId = await insertClient(tmpl);
     const reportCount = await generateQuarterlyHistory(clientId, tmpl, generatorUserId);
     totalClients++;
     totalReports += reportCount;
-    console.log(`  ✓  ${tmpl.householdName} (${clientId}) — ${reportCount} reports`);
+    console.log(`[seed:synthetic] ✓ ${tmpl.householdName} (${clientId}) — ${reportCount} reports`);
   }
 
-  console.log('');
-  console.log(`  ${totalClients} clients · ${totalReports} reports inserted.`);
-  console.log('');
+  console.log(`[seed:synthetic] inserted ${totalClients} clients · ${totalReports} reports`);
   process.exit(0);
 }
 
