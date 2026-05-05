@@ -130,7 +130,9 @@
       "Bash(FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --index-filter \"git rm --cached --ignore-unmatch 'docs/reference/educated.mp4'\" --prune-empty -- 1ee6465..HEAD)",
       "Bash(git reflog *)",
       "Bash(git gc *)",
-      "Bash(git update-ref *)"
+      "Bash(git update-ref *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
