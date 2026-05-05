@@ -1,8 +1,14 @@
-# Multi-stage build for the Windbrook portal.
-# Final image carries Node 20 + chromium (for Playwright PDF export) + the
-# compiled Tailwind CSS + the source TS (run via tsx).
-# Persistent storage:
-#   /app/data — SQLite + generated PDFs (mount Railway volume here)
+# Repo-root Dockerfile — Railway deploys with Root Directory = / and we
+# can't change that from code. Each COPY path explicitly references the
+# windbrook-portal/ subdirectory; the resulting image is identical to
+# what you'd get from `docker build windbrook-portal/`.
+#
+# Final image: Node 20 + chromium (for Playwright PDF export) + compiled
+# Tailwind CSS + the source TS (run via tsx).
+#
+# Persistent storage: /app/data — attach a Railway Volume to this mount
+# path via the Railway dashboard. (We deliberately do NOT use a Dockerfile
+# `VOLUME` instruction — Railway's Dockerfile builder rejects that.)
 FROM node:20-bookworm-slim AS base
 
 ENV PNPM_HOME=/usr/local/pnpm
@@ -12,13 +18,13 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 # ---------- deps stage ----------
 FROM base AS deps
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+COPY windbrook-portal/package.json windbrook-portal/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # ---------- build stage (compile Tailwind, run typecheck) ----------
 FROM deps AS build
 WORKDIR /app
-COPY . .
+COPY windbrook-portal/ ./
 RUN pnpm css:build
 RUN pnpm typecheck
 
@@ -48,26 +54,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# Tell Playwright to use the system chromium (no separate ~280 MB download).
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Copy production deps + built assets.
+# Copy production deps + built CSS from earlier stages, then the source
+# from the windbrook-portal/ subdirectory.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/public/css ./public/css
-COPY . .
+COPY windbrook-portal/ ./
 
-# Volume mount target for SQLite + PDFs. Railway must attach a Volume to
-# /app/data via the dashboard (Service → Settings → Volumes → Mount Path =
-# /app/data). The Dockerfile `VOLUME` directive is intentionally absent —
-# Railway's Dockerfile builder rejects it.
+# Volume mount path — Railway must attach a Volume to /app/data via the
+# dashboard (Service → Settings → Volumes → Mount Path = /app/data).
+# No `VOLUME` directive — Railway's Dockerfile builder rejects it.
 RUN mkdir -p /app/data /app/data/reports
 
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
-# Healthcheck mirrors what Railway uses via railway.json
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
