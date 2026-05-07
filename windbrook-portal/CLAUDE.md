@@ -742,6 +742,114 @@ no `dist/` build step.
 
 ---
 
+## 16. Export pipeline (Phase 30 — additive PPTX path)
+
+The portal exposes three report-export buttons on the report-detail page:
+
+| Button | Route | Pipeline | Status |
+|---|---|---|---|
+| Download PDF | `POST /clients/:id/reports/:rid/export/pdf` | SVG → Playwright (chromium) → PDF | **Live** (Phase 8 path, untouched) |
+| Export to PowerPoint | `POST /clients/:id/reports/:rid/export/pptx` | snapshot → `render-pptx.ts` → `.pptx` | **Live** (Phase 30) |
+| Export to Canva | `POST /clients/:id/reports/:rid/export/canva` | uploads PDF as Canva asset | Live (Phase 11) |
+
+Each button is a `<form method="post">` that wraps a `<button class="action-button">`. The three buttons are uniform bordered ghost buttons — same height, same padding, same hover treatment (Phase 25/26 alignment work).
+
+**Why PPTX matters.** Andrew's team historically rebuilt these reports by hand in Canva. Export to PowerPoint hands them an editable artifact in their existing tooling. PPTX is the long-term "source of truth" export format; PDF is a derivative.
+
+### Files
+
+```
+src/reports/
+  pdf.ts                  Phase-8 Playwright SVG→PDF (still used by /export/pdf)
+  pptx-to-pdf.ts          Phase-30 LibreOffice headless PPTX→PDF wrapper
+  sacs/
+    render.ts             SVG renderer for in-portal preview + the Phase-8 PDF
+    render-pptx.ts        pptxgenjs SACS renderer (2 slides)
+  tcc/
+    render.ts             SVG renderer for in-portal preview + the Phase-8 PDF
+    render-pptx.ts        pptxgenjs TCC renderer (1 slide, simplified layout)
+
+scripts/
+  generate-pptx-assets.ts Rasterizes the inline SVG illustrations to PNG
+  smoke-pptx.mts          End-to-end smoke test of /export/pptx
+
+public/assets/
+  piggy-bank.png          Generated; embedded in SACS PPTX slide 1
+  papers-icon.png         Generated; embedded in SACS PPTX slide 1
+```
+
+### Asset regeneration
+
+PowerPoint can't embed inline SVG, so the piggy-bank illustration and papers-stack icon become PNGs at module load time. After editing the inline SVG geometry in `src/reports/sacs/render.ts`, regenerate the PNGs:
+
+```sh
+pnpm tsx scripts/generate-pptx-assets.ts
+```
+
+Commit the resulting `public/assets/*.png` files. They're ~10–20 KB each.
+
+### Migration plan: additive then flip
+
+Phase 30 ships PPTX export **alongside** the existing Playwright PDF path, not as a replacement. The migration to "PDF derives from PPTX" runs in two steps:
+
+1. **Now (Phase 30)** — `/export/pptx` is live. `/export/pdf` still uses `pdf.ts` (Playwright). LibreOffice is added to the Dockerfile but only exercised by:
+   - `prewarmLibreOffice()` at server boot — non-fatal if missing, logs a clear warning
+   - `/internal/test-pptx-pdf` — diagnostic-only, mounted only when `DEBUG_PPTX_PDF=1` in env
+2. **Once verified (follow-up phase)** — flip `/export/pdf` to the new pipeline (`renderSacs/TccPptx → pptxBufferToPdfBuffer`) and delete `pdf.ts`. Pixel fidelity is expected to drop ~10–15 % from the Playwright path; that's accepted because PPTX becomes the source of truth and PowerPoint is what Andrew's team edits.
+
+### Verifying LibreOffice in production
+
+After a Railway deploy that includes the Dockerfile changes:
+
+1. Set `DEBUG_PPTX_PDF=1` in the service's env vars and redeploy.
+2. Hit `https://<host>/internal/test-pptx-pdf` while signed in.
+3. The browser should display a 2-slide PDF generated through the full PPTX → LibreOffice pipeline. If you see a 500, the response body has the LibreOffice stderr.
+4. Once the diagnostic returns a valid PDF, you've confirmed:
+   - `libreoffice` binary is on PATH
+   - JRE is installed (LibreOffice's PDF export filter needs Java)
+   - `prewarmLibreOffice()` is firing without `ENOENT`
+5. Unset `DEBUG_PPTX_PDF` and redeploy to remove the diagnostic surface before flipping `/export/pdf`.
+
+### Dockerfile additions
+
+The runtime stage installs LibreOffice + JRE + fallback fonts via apt. Multi-stage Docker doesn't carry apt installs forward, so they must land in the final stage:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-core libreoffice-impress \
+    default-jre-headless \
+    fonts-liberation fonts-lato \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+Image grows by ~400 MB (LibreOffice ~200 MB + JRE ~200 MB). Railway services that run hot in 512 MB RAM may need the bump to 1 GB — LibreOffice can spike to ~300 MB during a conversion.
+
+### Geist font in PDF output
+
+We ship Geist as woff2 only (`public/fonts/Geist-Variable.woff2`). LibreOffice uses fontconfig, which doesn't index woff2, so it substitutes Liberation Sans for sans-serif faces in the PDF output. Visual difference: minor (Liberation Sans is metrically close to Geist for body weights). To get exact Geist matching:
+
+1. Download Geist as TTF from Vercel's font repo and check it in at `public/fonts/Geist-Variable.ttf`.
+2. Uncomment the `COPY public/fonts/Geist-Variable.ttf … && fc-cache -f -v` block in the Dockerfile runtime stage.
+3. Redeploy.
+
+### Snapshot shape adaptation
+
+The pptxgenjs renderers accept the existing `SacsSnapshot` / `TccSnapshot` types unchanged — same flat shape `lib/reports.ts` `buildSacsRenderInput` / `buildTccRenderInput` produce. Field accesses inside `render-pptx.ts` mirror those in the SVG renderer. The Pinnacle PR value chip on SACS page 2 shows `privateReserveBalanceCents` (current balance) while the `… TARGET` line below shows `pinnacleTargetCents` — same fix that landed in Phase 28.
+
+### CJS / ESM interop
+
+`pptxgenjs` is CommonJS. Under tsx + ESM, the default import sometimes wraps the class in a `{ default: <Class> }` envelope. Both `render-pptx.ts` files defensively unwrap once at module load:
+
+```ts
+const PptxGenJS: typeof PptxGenJSDefault =
+  (PptxGenJSDefault as unknown as { default?: typeof PptxGenJSDefault }).default ??
+  PptxGenJSDefault;
+```
+
+If a future pptxgenjs version ships native ESM and the unwrap stops being needed, the indirection is cheap to keep.
+
+---
+
 ## Reference Index
 
 - `docs/references/PRD-andrew-windham.md` — full PRD, source of truth for scope.

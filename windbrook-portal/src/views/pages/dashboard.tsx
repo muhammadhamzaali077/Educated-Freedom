@@ -35,11 +35,11 @@ const tsFmt = new Intl.DateTimeFormat('en-US', {
   year: 'numeric',
 });
 
-const STATUS_LABEL: Record<DashboardData['households'][number]['status'], string> = {
-  ready: 'Ready',
-  stale: 'Balances stale',
-  needs_setup: 'Needs setup',
-};
+const meetingDateFmt = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
 
 type Props = {
   userName: string;
@@ -244,9 +244,14 @@ const HouseholdCard: FC<{
       </div>
 
       <footer class="dash-card-footer">
-        <span class={`status-pill status-pill-${household.status}`}>
-          {STATUS_LABEL[household.status]}
-        </span>
+        <div class="card-meta">
+          <span class="card-meta-label">Last meeting</span>
+          <span class="card-meta-value num">
+            {household.lastMeetingDate
+              ? meetingDateFmt.format(new Date(`${household.lastMeetingDate}T00:00:00`))
+              : '—'}
+          </span>
+        </div>
         <a
           class="text-link-accent dash-card-generate"
           href={`/clients/${household.id}/reports/new?type=TCC`}

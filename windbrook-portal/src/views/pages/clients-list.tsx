@@ -1,12 +1,6 @@
 import type { FC } from 'hono/jsx';
-import type { ClientStatus, ListedClient } from '../../lib/clients.js';
+import type { ListedClient } from '../../lib/clients.js';
 import { AppLayout } from '../layouts/app-layout.js';
-
-const STATUS_LABEL: Record<ClientStatus, string> = {
-  ready: 'Ready',
-  stale: 'Balances stale',
-  needs_setup: 'Needs setup',
-};
 
 const meetingDateFormat = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -60,16 +54,13 @@ export const ClientsListPage: FC<{
                 <h2 class="clients-row-name">{row.client.householdName}</h2>
                 <p class="clients-row-persons">{formatPersons(row.persons)}</p>
               </div>
-              <div class="clients-row-meeting">
-                <p class="label">Last meeting</p>
-                <p class="num clients-row-meeting-date">
+              <div class="clients-row-status card-meta">
+                <span class="card-meta-label">Last meeting</span>
+                <span class="card-meta-value num">
                   {row.lastMeetingDate
-                    ? meetingDateFormat.format(new Date(row.lastMeetingDate)).toUpperCase()
+                    ? meetingDateFormat.format(new Date(`${row.lastMeetingDate}T00:00:00`))
                     : '—'}
-                </p>
-              </div>
-              <div class="clients-row-status">
-                <StatusPill status={row.status} />
+                </span>
               </div>
             </a>
           </li>
@@ -77,10 +68,6 @@ export const ClientsListPage: FC<{
       </ol>
     )}
   </AppLayout>
-);
-
-const StatusPill: FC<{ status: ClientStatus }> = ({ status }) => (
-  <span class={`status-pill status-pill-${status}`}>{STATUS_LABEL[status]}</span>
 );
 
 const ClientsEmpty: FC = () => (

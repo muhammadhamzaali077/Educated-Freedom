@@ -315,6 +315,7 @@ export interface DashboardData {
     netWorthCents: number | null;
     deltaCents: number | null;
     status: 'ready' | 'stale' | 'needs_setup';
+    lastMeetingDate: string | null;
   }>;
   activity: Array<{
     id: string;
@@ -513,6 +514,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
 
       const accs = accountsByClient.get(c.id) ?? [];
       const status = computeClientStatus(accs, persons, newestSnapshotByAccount, cutoff);
+      const lastMeetingDate = latestByClient.get(c.id)?.meetingDate ?? null;
 
       return {
         id: c.id,
@@ -521,6 +523,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
         netWorthCents: netWorth,
         deltaCents: delta,
         status,
+        lastMeetingDate,
       };
     });
 

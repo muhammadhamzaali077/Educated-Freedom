@@ -44,6 +44,34 @@ COPY . .
 # image had chromium installed but pdf.ts couldn't find it.
 RUN npx --yes playwright install --with-deps chromium
 
+# Phase-30 — LibreOffice headless for the PPTX → PDF pipeline. Installed
+# in the runtime stage; multi-stage Docker doesn't carry apt installs
+# forward from earlier stages.
+#   - libreoffice-core + libreoffice-impress: minimum needed for `soffice
+#     --headless --convert-to pdf` against .pptx
+#   - default-jre-headless: required by LibreOffice's PDF export filter
+#     (~200 MB; --no-install-recommends keeps the image lean)
+#   - fonts-liberation: substitution target when our Geist Variable font
+#     isn't on fontconfig's path. LibreOffice picks Liberation Sans for
+#     missing sans-serif faces, which renders close to Geist
+#   - fonts-lato: secondary fallback used by some PowerPoint layouts
+# Note: we ship Geist as woff2 only (public/fonts/Geist-Variable.woff2).
+# fontconfig doesn't index woff2, so LibreOffice substitutes. To get
+# exact Geist rendering through LibreOffice, check in a Geist .ttf at
+# public/fonts/Geist-Variable.ttf and uncomment the COPY+fc-cache block
+# below (see Phase 30 notes in CLAUDE.md).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-core libreoffice-impress \
+    default-jre-headless \
+    fonts-liberation fonts-lato \
+    && rm -rf /var/lib/apt/lists/*
+
+# Optional: install Geist as a system font for exact LibreOffice matching.
+# Requires public/fonts/Geist-Variable.ttf to exist (we currently only
+# have woff2). Uncomment when a TTF is added.
+# COPY public/fonts/Geist-Variable.ttf /usr/share/fonts/truetype/geist/
+# RUN fc-cache -f -v
+
 # Volume mount target for SQLite + PDFs. Railway must attach a Volume to
 # /app/data via the dashboard (Service → Settings → Volumes → Mount Path =
 # /app/data). The Dockerfile `VOLUME` directive is intentionally absent —

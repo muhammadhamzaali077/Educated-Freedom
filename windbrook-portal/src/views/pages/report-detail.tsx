@@ -99,31 +99,28 @@ export const ReportDetailPage: FC<ReportDetailProps> = (p) => {
 };
 
 // =============================================================================
-// Action bar — desktop (flex-wrap) + mobile (<details>) variants share items
+// Action bar — uniform bordered ghost buttons (Phase 25). Desktop bar +
+// mobile <details> dropdown share the same item set; no separator dots —
+// the borders themselves create visual separation.
 // =============================================================================
 const ActionBar: FC<{ p: ReportDetailProps }> = ({ p }) => (
   <div class="report-detail-actions">
-    <ActionItems p={p} withDividers />
+    <ActionItems p={p} />
   </div>
 );
 
-const ActionItems: FC<{ p: ReportDetailProps; withDividers?: boolean }> = ({ p, withDividers }) => {
-  const Divider = () => (withDividers ? <span class="report-detail-divider" aria-hidden="true">·</span> : <></>);
+const ActionItems: FC<{ p: ReportDetailProps }> = ({ p }) => {
   const canvaConfigured = p.canvaEnvConfigured ?? true;
-  // Polish 4 — exactly one action gets the bordered "primary" treatment.
-  // Prefer Canva when the user has it connected (that's the path Maryann
-  // takes); fall back to PDF otherwise.
-  const primary: 'canva' | 'pdf' = canvaConfigured && p.canvaConnected ? 'canva' : 'pdf';
-  const pdfClass = primary === 'pdf' ? 'action-link-primary' : 'text-link-accent';
-  const canvaClass = primary === 'canva' ? 'action-link-primary' : 'text-link-accent';
   return (
     <>
-      <form method="post" action={`/clients/${p.clientId}/reports/${p.reportId}/export/pdf`}>
-        <button type="submit" class={pdfClass}>Download PDF</button>
+      <form method="post" action={`/clients/${p.clientId}/reports/${p.reportId}/export/pdf`} class="action-form">
+        <button type="submit" class="action-button">Download PDF</button>
       </form>
-      <Divider />
+      <form method="post" action={`/clients/${p.clientId}/reports/${p.reportId}/export/pptx`} class="action-form">
+        <button type="submit" class="action-button">Export to PowerPoint</button>
+      </form>
       {!canvaConfigured ? (
-        <span class="text-link-muted" title="See CLAUDE.md → Canva Developer Portal Setup">
+        <span class="action-button-muted" title="See CLAUDE.md → Canva Developer Portal Setup">
           <em>Canva export disabled — see CLAUDE.md.</em>
         </span>
       ) : p.canvaConnected ? (
@@ -133,34 +130,33 @@ const ActionItems: FC<{ p: ReportDetailProps; withDividers?: boolean }> = ({ p, 
           hx-post={`/clients/${p.clientId}/reports/${p.reportId}/export/canva`}
           hx-disabled-elt="find button"
           target="_blank"
+          class="action-form"
         >
-          <button type="submit" class={canvaClass}>
+          <button type="submit" class="action-button">
             {p.canvaDesignId ? 'Re-export to Canva' : 'Export to Canva'}
           </button>
         </form>
       ) : (
-        <a class="text-link-muted" href="/settings">Connect Canva to enable export &rarr;</a>
+        <a class="action-button-muted" href="/settings">Connect Canva to enable export &rarr;</a>
       )}
       {p.canvaEditUrl ? (
-        <a class="text-link-muted" href={p.canvaEditUrl} target="_blank" rel="noreferrer">
+        <a class="action-button" href={p.canvaEditUrl} target="_blank" rel="noreferrer">
           View in Canva &rarr;
         </a>
       ) : null}
-      <Divider />
       <button
         type="button"
         id="edit-layout-toggle"
-        class="text-link-accent edit-layout-toggle"
+        class="action-button edit-layout-toggle"
         aria-pressed="false"
       >
         Edit layout
       </button>
-      <Divider />
       {/* Reset is hidden in view mode; only revealed when the page enters
           edit mode (CSS rule on [data-edit-mode="on"] .report-detail-reset). */}
       <button
         type="button"
-        class="text-link-muted report-detail-reset"
+        class="action-button-muted report-detail-reset"
         hx-delete={`/clients/${p.clientId}/layouts/${p.reportType}?reportId=${p.reportId}`}
         hx-target={`#report-canvas-${p.reportId}`}
         hx-swap="outerHTML"

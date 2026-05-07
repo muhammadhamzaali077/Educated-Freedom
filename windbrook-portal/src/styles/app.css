@@ -598,17 +598,22 @@
     color: var(--color-ink-soft);
   }
 
+  /* Phase-25: dashboard tightened to the top of .app-content via :has() —
+     greeting now sits ~40 px below the breadcrumb on desktop (was ~144 px). */
+  .app-content:has(> .dash-hero) {
+    padding-top: 32px;
+  }
   .dash-hero {
-    padding: 96px 0 64px;
+    padding: 16px 0 32px;
   }
   .dash-greeting {
     font-family: var(--font-display);
-    font-size: 64px;
+    font-size: 44px;
     font-weight: 500;
     line-height: 1.1;
     letter-spacing: -0.01em;
     color: var(--color-ink);
-    margin: 0 0 60px;
+    margin: 0 0 32px;
   }
   .dash-greeting-suffix {
     color: var(--color-ink-muted);
@@ -636,7 +641,7 @@
   }
   .dash-hero-number {
     font-family: var(--font-display);
-    font-size: var(--fs-5xl);
+    font-size: 80px;
     font-weight: 500;
     line-height: 1;
     letter-spacing: -0.02em;
@@ -648,7 +653,7 @@
   .dash-hero-of {
     font-family: var(--font-display);
     font-style: italic;
-    font-size: var(--fs-xl);
+    font-size: 24px;
     font-weight: 500;
     color: var(--color-ink-muted);
     letter-spacing: 0;
@@ -1080,8 +1085,8 @@
   /* Narrow viewport — collapse hero into a stack, single-column grid,
      ledger drops below grid */
   @media (max-width: 1023px) {
-    .dash-hero { padding: 56px 0 40px; }
-    .dash-greeting { font-size: 44px; }
+    .dash-hero { padding: 32px 0 24px; }
+    .dash-greeting { font-size: 36px; margin-bottom: 24px; }
     .dash-hero-row {
       grid-template-columns: 1fr;
       gap: 40px;
@@ -1138,15 +1143,36 @@
     color: var(--color-ink-soft);
   }
   .text-link-accent {
+    display: inline-block;
     font-family: var(--font-body);
     font-size: 14px;
     font-weight: 500;
     color: var(--color-accent);
     text-decoration: none;
-    transition: color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  /* Buttons styled as accent links keep native button reset (no Safari
+     padding, no UA gradient). */
+  button.text-link-accent {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
   }
   .text-link-accent:hover {
-    color: #94724E;
+    background-color: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+  .text-link-accent:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
   }
   .text-link-accent:disabled,
   .text-link-accent[disabled] {
@@ -1171,7 +1197,7 @@
   .clients-row {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 180px 160px;
+    grid-template-columns: minmax(0, 1fr) 180px;
     align-items: center;
     gap: 24px;
     height: 80px;
@@ -1223,28 +1249,32 @@
   .clients-row-status {
     text-align: right;
   }
-
-  .status-pill {
-    display: inline-block;
-    border: 1px solid currentColor;
-    border-radius: 999px;
-    padding: 3px 10px;
+  /* Shared "Last meeting" meta block — replaces the deprecated status pill on
+     dashboard household cards and on the /clients list rows. Stacks label
+     above value, no pill chrome. */
+  .card-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+  }
+  .clients-row-status.card-meta {
+    text-align: right;
+    align-items: flex-end;
+  }
+  .card-meta-label {
     font-family: var(--font-body);
     font-size: 11px;
     font-weight: 500;
-    text-transform: uppercase;
     letter-spacing: 0.08em;
-    line-height: 1;
-    white-space: nowrap;
+    text-transform: uppercase;
+    color: var(--color-ink-soft);
   }
-  .status-pill-ready {
-    color: var(--color-success);
-  }
-  .status-pill-stale {
-    color: var(--color-warning);
-  }
-  .status-pill-needs_setup {
-    color: var(--color-danger);
+  .card-meta-value {
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--color-ink-muted);
   }
 
   .clients-empty {
@@ -2041,9 +2071,13 @@
     justify-content: space-between;
     align-items: flex-end;
     gap: 24px 32px;
-    margin-bottom: 0;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--color-rule);
+    margin-bottom: 40px;
   }
   .report-detail-titles {
+    flex: 1 1 auto;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -2087,12 +2121,13 @@
     margin-left: 8px;
   }
   .report-detail-actions {
+    flex: 0 0 auto;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    column-gap: 32px;
-    row-gap: 12px;
+    gap: 12px;
     margin-left: auto;
+    padding-bottom: 4px; /* visually align with the meeting date baseline */
     font-family: var(--font-body);
     font-size: 14px;
   }
@@ -2100,48 +2135,152 @@
     flex-shrink: 0;
     white-space: nowrap;
   }
-  .report-detail-actions form {
+  /* Form wrappers around POST-submit buttons need to behave as flex items,
+     not block elements — otherwise their default block layout drops the
+     enclosed button onto its own visual line, throwing off horizontal
+     alignment with the bare <a>/<button> siblings. */
+  .report-detail-actions .action-form {
     display: inline-flex;
-  }
-  .report-detail-actions a,
-  .report-detail-actions button {
-    flex-shrink: 0;
-    white-space: nowrap;
-    background: transparent;
-    border: 0;
+    align-items: center;
+    margin: 0;
     padding: 0;
-    cursor: pointer;
-    font: inherit;
-    color: inherit;
   }
-  /* Polish 4 — primary action: bordered text link, fills on hover. NOT a
-     SaaS button row — same height as the surrounding text links. */
-  .action-link-primary {
-    display: inline-block;
-    padding: 4px 8px;
-    border: 1px solid var(--color-ink);
-    color: var(--color-ink);
+  /* Phase-26 normalized ghost button. Anchors, bare buttons, and
+     form-wrapped buttons all carry slightly different default box behavior
+     (line-height, baseline, vertical-align, native button chrome on
+     Safari). The properties on the shared `.action-button + .action-button-sm`
+     rule below force every variant into the same box. The size-specific
+     blocks then layer on padding / border / typography / explicit height. */
+  .action-button,
+  .action-button-sm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    line-height: 1;
+    margin: 0;
+    text-decoration: none;
+    box-sizing: border-box;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: var(--font-body);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .action-button {
+    gap: 8px;
+    height: 40px;
+    padding: 10px 18px;
+    border: 1px solid var(--color-rule);
+    border-radius: 4px;
     background: transparent;
-    font: inherit;
+    color: var(--color-ink);
+    font-size: 14px;
     font-weight: 500;
-    cursor: pointer;
-    transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
-                color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition:
+      border-color 180ms cubic-bezier(0.4, 0, 0.2, 1),
+      background-color 180ms cubic-bezier(0.4, 0, 0.2, 1),
+      color 180ms cubic-bezier(0.4, 0, 0.2, 1),
+      transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
   }
-  .action-link-primary:hover,
-  .action-link-primary:focus-visible {
-    background: var(--color-ink);
+  .action-button:hover {
+    border-color: var(--color-ink);
+    background-color: var(--color-ink);
     color: var(--color-bg-raised);
-    outline: none;
+    transform: translateY(-1px);
+  }
+  .action-button:active {
+    transform: translateY(0);
+  }
+  .action-button:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  /* Edit-layout toggle in active state ("Done editing"). Driven by the
+     layout-editor.js click handler that flips `is-active` + aria-pressed. */
+  .action-button.is-active,
+  .action-button[aria-pressed="true"] {
+    background-color: var(--color-accent-soft);
+    border-color: var(--color-accent);
+    color: var(--color-ink);
+  }
+  .action-button.is-active:hover,
+  .action-button[aria-pressed="true"]:hover {
+    background-color: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-bg-raised);
+  }
+  /* Quieter sibling — same shape, dashed border, italic muted-ink fill.
+     Used for "Connect Canva to enable export →", the missing-env-vars
+     fallback, and "Reset to default layout". */
+  .action-button-muted {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border: 1px dashed var(--color-rule);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-ink-soft);
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 400;
+    font-style: italic;
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+    transition:
+      border-color 180ms cubic-bezier(0.4, 0, 0.2, 1),
+      color 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .action-button-muted:hover {
+    color: var(--color-ink);
+    border-style: solid;
+    border-color: var(--color-ink-soft);
+  }
+  .action-button-muted:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  /* Compact tabular variant — used in the report-history rows on the
+     client-detail page. Inherits the shared normalization above (line-height
+     1, vertical-align middle, no native button chrome); only adds size /
+     border / typography / explicit height. */
+  .action-button-sm {
+    gap: 6px;
+    height: 32px;
+    padding: 6px 12px;
+    border: 1px solid var(--color-rule);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--color-ink);
+    font-size: 13px;
+    font-weight: 500;
+    transition:
+      border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .action-button-sm:hover {
+    border-color: var(--color-ink);
+    background-color: var(--color-ink);
+    color: var(--color-bg-raised);
+  }
+  .action-button-sm:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
   }
   /* Edit-layout toggle — tinted background when active. */
-  .edit-layout-toggle.is-active {
-    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-    padding: 4px 8px;
-  }
+  /* Phase-25: edit-layout active-state styling now lives on .action-button
+     (.action-button.is-active / [aria-pressed="true"]). The legacy
+     .edit-layout-toggle override is no longer needed. */
   .report-detail-divider {
-    color: var(--color-rule);
-    font-size: 16px;
+    color: var(--color-ink-soft);
+    opacity: 0.5;
+    user-select: none;
+    margin: 0 4px;
+    font-size: 12px;
   }
   /* "Reset to default layout" only visible when in edit mode. */
   .report-detail-reset { display: none; }
@@ -2600,21 +2739,17 @@
   .history-row-actions .text-link-muted {
     font-size: 12px;
   }
-  .history-inline-form {
+  /* Phase-26 alignment fix: PDF download form needs to behave as a flex
+     item with no extra block padding so the wrapped button sits at the
+     same baseline as the sibling <a>'s. */
+  .history-row-actions .history-inline-form {
     display: inline-flex;
-  }
-  .history-inline-form button {
-    background: transparent;
-    border: 0;
-    cursor: pointer;
+    align-items: center;
+    margin: 0;
     padding: 0;
-    font-family: var(--font-body);
-    font-size: 12px;
-    color: var(--color-ink-muted);
   }
-  .history-inline-form button:hover {
-    color: var(--color-ink);
-  }
+  /* Phase-25: the per-row PDF button now uses .action-button-sm; the
+     previous chrome-strip rule conflicted with that class's border. */
 
   /* ============================================================
      Error pages (404, 500) — editorial

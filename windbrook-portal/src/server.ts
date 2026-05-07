@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { app } from './app.js';
 import { prewarmBrowser, shutdownBrowser } from './reports/pdf.js';
+import { prewarmLibreOffice } from './reports/pptx-to-pdf.js';
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -54,6 +55,12 @@ serve(
     console.log(`  http://127.0.0.1:${info.port}   ← USE THIS for Canva OAuth`);
     console.log(`  http://localhost:${info.port}   ← convenience, do NOT use for Canva`);
     prewarmBrowser();
+    // Phase-30 — pre-warm LibreOffice for the PPTX → PDF pipeline. Both
+    // pre-warms run independently; either is allowed to fail without
+    // crashing boot. Playwright stays because /export/pdf still uses it
+    // until the LibreOffice path is verified in production via
+    // /internal/test-pptx-pdf.
+    prewarmLibreOffice();
 
     // Confirm the IPv4 socket is reachable before the operator opens the
     // browser. A failed self-check almost certainly means another process

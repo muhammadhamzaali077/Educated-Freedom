@@ -235,16 +235,14 @@ const HistoryRow: FC<{ clientId: string; row: ReportHistoryRow }> = ({ clientId,
         )}
       </a>
       <div class="history-row-actions">
-        <a class="text-link-muted" href={`/clients/${clientId}/reports/${row.report.id}`}>
+        <a class="action-button-sm" href={`/clients/${clientId}/reports/${row.report.id}`}>
           View
         </a>
-        <span class="history-sep" aria-hidden="true">·</span>
         <form method="post" action={`/clients/${clientId}/reports/${row.report.id}/export/pdf`} class="history-inline-form">
-          <button type="submit" class="text-link-muted">PDF</button>
+          <button type="submit" class="action-button-sm">PDF</button>
         </form>
-        <span class="history-sep" aria-hidden="true">·</span>
         <a
-          class="text-link-muted"
+          class="action-button-sm"
           href={`/clients/${clientId}/reports/new?type=${row.report.reportType}&from=${row.report.id}`}
         >
           Duplicate as new

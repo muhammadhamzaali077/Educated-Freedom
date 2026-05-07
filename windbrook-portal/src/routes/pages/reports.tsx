@@ -10,6 +10,9 @@ import {
   pdfFilename,
   renderAndSavePdf,
 } from '../../reports/pdf.js';
+import { renderSacsPptx } from '../../reports/sacs/render-pptx.js';
+import { renderTccPptx } from '../../reports/tcc/render-pptx.js';
+import { pptxBufferToPdfBuffer } from '../../reports/pptx-to-pdf.js';
 import { readFileSync } from 'node:fs';
 import {
   defaultSacsAssignments,
@@ -22,11 +25,15 @@ import {
 } from '../../lib/layouts.js';
 import {
   buildReportInputs,
+  buildSacsRenderInput,
+  buildTccRenderInput,
   hasAllSacsRequired,
   loadAccountsWithLatestSnapshots,
   loadLiabilitiesWithLatest,
   loadReportPrefill,
+  parseSnapshot,
   renderReportPages,
+  resolveLayout,
   saveReport,
 } from '../../lib/reports.js';
 import { ReportCanvas, ReportDetailPage } from '../../views/pages/report-detail.js';
@@ -588,6 +595,109 @@ function buildBubbleLabels(accountList: AccountRow[]): Record<string, string> {
       `${a.accountType}${a.accountNumberLastFour ? ` ••${a.accountNumberLastFour}` : ''}`,
     ]),
   );
+}
+
+// =============================================================================
+// Phase-30 PPTX export. Additive — does NOT replace /export/pdf yet.
+// Once LibreOffice is verified working in production via the diagnostic
+// route below, the /export/pdf handler will be flipped to run the same
+// PPTX → LibreOffice → PDF pipeline.
+// =============================================================================
+app.post('/clients/:id/reports/:reportId/export/pptx', async (c) => {
+  const clientId = c.req.param('id');
+  const reportId = c.req.param('reportId');
+
+  const client = await loadClient(clientId);
+  if (!client) return c.notFound();
+  const [report] = await db
+    .select()
+    .from(reportsTable)
+    .where(eq(reportsTable.id, reportId))
+    .limit(1);
+  if (!report || report.clientId !== clientId) return c.notFound();
+
+  const snapshot = parseSnapshot(report.snapshotJson);
+  const layout = resolveLayout(report.reportType, client, snapshot, null);
+
+  let pptxBuffer: Buffer;
+  try {
+    if (report.reportType === 'SACS') {
+      const sacsInput = buildSacsRenderInput(client, snapshot, report.meetingDate);
+      const pptx = renderSacsPptx(sacsInput);
+      pptxBuffer = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+    } else {
+      const tccInput = buildTccRenderInput(client, snapshot, layout, report.meetingDate);
+      const pptx = renderTccPptx(tccInput);
+      pptxBuffer = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[pptx] render failed:', msg);
+    return c.text(`PPTX export failed: ${msg}`, 500);
+  }
+
+  const filename = pdfFilename({
+    householdName: client.client.householdName,
+    reportType: report.reportType,
+    meetingDate: report.meetingDate,
+  }).replace(/\.pdf$/, '.pptx');
+
+  c.header(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  );
+  c.header('Content-Disposition', `attachment; filename="${filename}"`);
+  c.header('Content-Length', String(pptxBuffer.length));
+  return c.body(new Uint8Array(pptxBuffer));
+});
+
+// =============================================================================
+// Phase-30 diagnostic. Mounted only when DEBUG_PPTX_PDF=1 in env.
+// Used to smoke-test the LibreOffice pipeline in production before
+// flipping the main /export/pdf route. Exercises the full PPTX → PDF
+// path with a real Cole-shaped fixture, returns the PDF inline so the
+// operator can open it directly in the browser.
+// =============================================================================
+if (process.env.DEBUG_PPTX_PDF === '1') {
+  app.get('/internal/test-pptx-pdf', async (c) => {
+    const $ = (d: number) => Math.round(d * 100);
+    const fixture = {
+      householdName: 'Cole Household',
+      meetingDate: '2026-01-21',
+      inflowSources: [{ personFirstName: 'Marcus', monthlyAmountCents: $(14500) }],
+      monthlyInflowCents: $(14500),
+      monthlyOutflowCents: $(8500),
+      automatedTransferDay: 28,
+      privateReserveBalanceCents: $(38000),
+      privateReserveMonthlyContributionCents: $(6000),
+      pinnacleTargetCents: $(76500),
+      pinnacleTargetBreakdown: {
+        sixXExpensesCents: $(51000),
+        homeownerDeductibleCents: $(2500),
+        autoDeductibleCents: $(1000),
+        medicalDeductibleCents: $(3000),
+      },
+      schwabBalanceCents: $(84000),
+      remainderCents: 0,
+      inflowFloorCents: $(1000),
+      outflowFloorCents: $(1000),
+      privateReserveFloorCents: $(1000),
+      staleFields: new Set<string>(),
+    };
+    try {
+      const pptx = renderSacsPptx(fixture);
+      const pptxBuf = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+      const pdfBuf = await pptxBufferToPdfBuffer(pptxBuf);
+      c.header('Content-Type', 'application/pdf');
+      c.header('Content-Disposition', 'inline; filename="diagnostic.pdf"');
+      c.header('Content-Length', String(pdfBuf.length));
+      return c.body(new Uint8Array(pdfBuf));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[diagnostic /internal/test-pptx-pdf]', msg);
+      return c.text(`Diagnostic failed: ${msg}`, 500);
+    }
+  });
 }
 
 export default app;

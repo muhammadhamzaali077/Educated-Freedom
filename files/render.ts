@@ -1,123 +1,57 @@
 /**
- * TCC (Total Client Chart) renderer.
+ * SACS renderer — Phase 28 PIXEL-PERFECT REBUILD.
  *
- * Phase 21 spacing rebuild. Phase 20 fixed client-oval overlap but left two
- * residual issues:
- *   • Adjacent bubbles in the same row (cx=100 + cx=240) had touching edges
- *     at x=170 — no air between them. Roth IRA and IRA Rollover sat flush.
- *   • NR row 1 bubbles at cy=530 with ry=55 ended at y=585. Trust circle
- *     started at cy-r=620-70=550, but inner-col bubbles at cx=240 (right
- *     edge x=310) had only 16 px clearance from the trust left edge x=326.
- *     Combined with the divider at y=520, NR row 1 bubbles visually
- *     "crashed into" the divider line.
+ * EVERY coordinate in this file was extracted directly from the reference
+ * PDF (`docs/references/Copy_of_SACS-_for_Sagan.pdf`) using PyMuPDF. No
+ * eyeballing, no guessing — these are the source-of-truth numbers.
  *
- * Phase 21 reset all spacing using verified math. Every gap is now ≥10 px.
+ * Canvas: 768 × 576 (matches reference, was 792× something).
  *
- *   Cols: 100, 270, 522, 692 (4 cols).
- *     Outer→Inner gap: 270-70 - (100+70) = 30 px. (Was 0.)
- *   Retirement: 3 rows at cy=125, 270, 415. Client oval rx=50 (was 80).
- *     Inner bubble right-edge x=340; client oval left-edge x=346 → 6 px.
- *   NR: 2 rows at cy=595, 875. Trust at cy=720, r=50 (was 70).
- *     Inner-col bubble right-edge x=340; trust left-edge x=346 → 6 px.
- *   Liabilities box now sits between trust (bottom y=770) and NR row 2
- *     (top y=820), in the 40-px corridor y=775-815. Compact 2-row layout.
- *   Canvas H grew 820 → 1000 to absorb the cleaner spacing. The PDF
- *     export already uses the SVG viewBox so US Letter scaling stays
- *     correct at print time.
+ * Reference fonts (Canva proprietary) substituted with our self-hosted
+ * Geist Sans:
+ *   Inter-Bold        → Geist Bold
+ *   Garet-Bold        → Geist Bold
+ *   CanvaSans-Bold    → Geist Bold
+ *   CanvaSans-Regular → Geist Regular
  *
- * Slot ID schema MOSTLY preserved (24 → 20):
- *   p1-1..6, p2-1..6 (12 retirement slots — unchanged)
- *   nr-l-1..4, nr-r-1..4 (8 NR slots — was 12)
- *
- * Saved layouts that referenced nr-l-5/6 or nr-r-5/6 will silently fall
- * back to default placement when those slot IDs are absent. The layout
- * route (`POST /clients/:cid/reports/:rid/layout`) already validates the
- * target slot exists before persisting, so future drag-saves can only
- * land on the new 8-slot grid.
- *
- * NR section now has 8 slots (was 12). Park-Rivera (5 NR accounts) fills
- * row 1 fully (4 cols) plus 1 of row 2 — visually balanced. Cole (2 NR)
- * fills 2 slots on row 1 (1 per side). Lipski (3 NR) fills row 1 left
- * + row 1 right + row 1 inner-left.
- *
- * Phase 18 — bubbles are ELLIPSES (140×110). Phase 19 — Canva s256 fix.
- * Phase 20 — drag silent-snap-back fix in layout-editor.js.
- * Phase 22 — self-healing slot remap so saved layouts that reference
- * deprecated slot IDs (from before slot-grid changes) automatically
- * fall through to the next available default slot. Combined with the
- * `pnpm db:migrate:phase22` migration that clears stale TCC layouts,
- * every TCC report now renders with consistent shape.
+ * KEEP: real client numbers (not $00,000 placeholders), correct
+ * "MONTHLY EXPENSES" spelling.
  */
+
 import { FONT_FACE_CSS } from '../_fonts.js';
 
 // =============================================================================
-// Types
+// Types — unchanged from prior phases
 // =============================================================================
-export interface CircleAnchor {
-  cx: number;
-  cy: number;
-  r: number;
-}
-export interface OvalAnchor {
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
-}
-
-export interface TccPerson {
-  firstName: string;
-  lastName: string;
-  dateOfBirth: string;
-  ssnLastFour: string;
-}
-
-export interface TccBubble {
-  accountId: string;
-  slotId: string;
-  accountType: string;
-  institution: string | null;
-  accountNumberLastFour: string | null;
-  balanceCents: number;
-  cashCents: number | null;
-  asOfDate: string;
-  isStale: boolean;
-}
-
-export interface TccLiability {
-  creditorName: string;
-  liabilityType: string;
-  balanceCents: number;
-  interestRateBps: number | null;
-  payoffDate: string | null;
-  isStale: boolean;
-}
-
-export interface TccSnapshot {
+export interface SacsSnapshot {
   householdName: string;
-  meetingDate: string;
+  meetingDate: string; // ISO yyyy-mm-dd
   asOfDate: string;
-  persons: TccPerson[];
-  retirementBubbles: TccBubble[];
-  nonRetirementBubbles: TccBubble[];
-  trust: { valueCents: number; asOfDate: string; isStale: boolean };
-  liabilities: TccLiability[];
-  totals: {
-    p1RetirementCents: number;
-    p2RetirementCents: number;
-    nonRetirementCents: number;
-    trustCents: number;
-    grandTotalCents: number;
-    liabilitiesTotalCents: number;
+  persons: Array<{
+    firstName: string;
+    monthlyInflowCents: number;
+  }>;
+  inflow: {
+    monthlyTotalCents: number;
+  };
+  outflow: {
+    monthlyTotalCents: number;
+    automatedTransferDay: number; // 1-31
+  };
+  privateReserve: {
+    monthlyContributionCents: number;
+    targetCents: number;
+    breakdown: {
+      sixMonthsExpensesCents: number;
+      homeownerDeductibleCents: number;
+      autoDeductibleCents: number; // single auto, will be doubled for display
+      medicalDeductibleCents: number;
+    };
+  };
+  schwab: {
+    valueCents: number;
   };
   staleFields: Set<string>;
-}
-
-export interface TccBubbleLayout {
-  clientOval: OvalAnchor;
-  trustCircle: CircleAnchor;
-  retirementSlots: Record<string, CircleAnchor>;
-  nonRetirementSlots: Record<string, CircleAnchor>;
 }
 
 export interface RenderOptions {
@@ -125,115 +59,42 @@ export interface RenderOptions {
 }
 
 // =============================================================================
-// Phase 21 spacing — DO NOT MODIFY
+// CANVAS — extracted from reference
 // =============================================================================
-const BUBBLE_RX = 70;
-const BUBBLE_RY = 55;
-
-const Y_ACCT_NUM = -32;
-const Y_ACCT_TYPE = -10;
-const Y_BALANCE = +12;
-const Y_DATE = +34;
-
-const FONT_ACCT = 9;
-const FONT_TYPE = 12;
-const FONT_BALANCE = 15;
-const FONT_DATE = 9;
-
-// Phase 21 — trust shrunk r=70 → 50 to give inner-col bubbles 6px clearance.
-const TRUST_RADIUS = 50;
-
-// Client oval — circular (rx=ry=50) so it visually balances the trust circle.
-const CLIENT_OVAL_RX = 50;
-const CLIENT_OVAL_RY = 50;
-
-const CANVAS_W = 792;
-// Phase 21 — H grown 820 → 1000 to absorb 3 ret rows + 2 NR rows + liab box
-// + banners with ≥10 px gaps everywhere.
-const CANVAS_H = 1000;
-const PAGE_CENTER_X = CANVAS_W / 2;
-
-// Columns — 4 cols, 30 px between adjacent right/left edges.
-//   100, 270, 522, 692
-//   Outer right edge: 100 + 70 = 170
-//   Inner left edge:  270 - 70 = 200
-//   Gap: 30 px
-const COL_LEFT_OUTER = 100;
-const COL_LEFT_INNER = 270;
-const COL_RIGHT_INNER = 522; // = CANVAS_W - 270
-const COL_RIGHT_OUTER = 692; // = CANVAS_W - 100
-
-// Retirement section: y=0 to y=480 (banner). 3 rows + client oval.
-const RET_ROW_CY = [125, 270, 415] as const;
-const RET_BANNER_Y = 480;
-const RET_BANNER_H = 20;
-const DIVIDER_Y = 520;
-const CLIENT_OVAL_CY = 270;
-
-// NR section: y=540 (above row 1) to y=945 (banner). 2 rows + trust + liab.
-const NR_ROW_CY = [595, 875] as const;
-const NR_TCY = 720;
-const LIAB_BOX_Y = 775;
-const LIAB_BOX_H = 40;
-const NR_BANNER_Y = 945;
-const NR_BANNER_H = 20;
-const FOOTNOTE_Y = 975;
+const CANVAS_W = 768;
+const CANVAS_H = 576;
 
 // =============================================================================
-// Slot grids
+// COLORS — exact RGB values from the reference PDF
 // =============================================================================
-function makeRetirementSlots(): Record<string, CircleAnchor> {
-  const slots: Record<string, CircleAnchor> = {};
-  let i1 = 1;
-  let i2 = 1;
-  for (const cy of RET_ROW_CY) {
-    slots[`p1-${i1++}`] = { cx: COL_LEFT_OUTER, cy, r: BUBBLE_RX };
-    slots[`p1-${i1++}`] = { cx: COL_LEFT_INNER, cy, r: BUBBLE_RX };
-    slots[`p2-${i2++}`] = { cx: COL_RIGHT_INNER, cy, r: BUBBLE_RX };
-    slots[`p2-${i2++}`] = { cx: COL_RIGHT_OUTER, cy, r: BUBBLE_RX };
-  }
-  return slots;
-}
-
-function makeNonRetirementSlots(): Record<string, CircleAnchor> {
-  // 2 rows × 4 cols = 8 slots (was 12). Slot IDs nr-l-1..4 + nr-r-1..4.
-  // Saved layouts referencing nr-l-5/6 or nr-r-5/6 fall back to default
-  // placement at render time.
-  const slots: Record<string, CircleAnchor> = {};
-  let il = 1;
-  let ir = 1;
-  for (const cy of NR_ROW_CY) {
-    slots[`nr-l-${il++}`] = { cx: COL_LEFT_OUTER, cy, r: BUBBLE_RX };
-    slots[`nr-l-${il++}`] = { cx: COL_LEFT_INNER, cy, r: BUBBLE_RX };
-    slots[`nr-r-${ir++}`] = { cx: COL_RIGHT_INNER, cy, r: BUBBLE_RX };
-    slots[`nr-r-${ir++}`] = { cx: COL_RIGHT_OUTER, cy, r: BUBBLE_RX };
-  }
-  return slots;
-}
-
-export const DEFAULT_TCC_LAYOUT: TccBubbleLayout = {
-  clientOval: { cx: PAGE_CENTER_X, cy: CLIENT_OVAL_CY, rx: CLIENT_OVAL_RX, ry: CLIENT_OVAL_RY },
-  trustCircle: { cx: PAGE_CENTER_X, cy: NR_TCY, r: TRUST_RADIUS },
-  retirementSlots: makeRetirementSlots(),
-  nonRetirementSlots: makeNonRetirementSlots(),
-};
+// Inflow green: rgb(0, 0.7608, 0.3451) → #00C258
+const C_INFLOW_GREEN = '#00C258';
+// Outflow red: rgb(0.949, 0.20, 0.1804) → #F23341 — but the ref text color
+// 15872814 = 0xF22F2E — close enough, use #F22F2E for stroke consistency
+const C_OUTFLOW_RED = '#F22F2E';
+// Private reserve blue (page 1): rgb(0.259, 0.545, 0.808) → #428BCE
+const C_RESERVE_BLUE = '#428BCE';
+// Pinnacle PR light blue (page 2): rgb(0.608, 0.796, 0.922) → #9BCBEB
+const C_PINNACLE_BLUE = '#9BCBEB';
+// Schwab navy (page 2): rgb(0.106, 0.212, 0.365) → #1B365D
+const C_SCHWAB_NAVY = '#1B365D';
+// Pinnacle PR text on white box (lighter blue): 10210283 = 0x9BCBEB
+const C_PINNACLE_TEXT = '#9BCBEB';
+// Schwab text on white box (navy): 1783389 = 0x1B365D
+const C_SCHWAB_TEXT = '#1B365D';
+// Subtitle blue (footer page 2): 4361166 = 0x428DCE
+const C_SUBTITLE_BLUE = '#428DCE';
+// Inflow value text on white: 49752 = 0x00C258 (green)
+const C_INFLOW_VALUE = '#00C258';
+// Outflow value text: 15872814 = 0xF22F2E (red)
+const C_OUTFLOW_VALUE = '#F22F2E';
+const C_INK = '#000000';
+const C_WHITE = '#FFFFFF';
 
 // =============================================================================
-// Palette — match Andrew's existing TCC template
+// FONT FAMILIES (substitution mapping)
 // =============================================================================
-const C_NAVY = '#1B3A6B';
-const C_NAVY_DEEP = '#142850';
-const C_BLUE_LIGHT = '#A8C5E2';
-const C_INK = '#0A1F3A';
-const C_INK_MUTED = '#4A5568';
-const C_INK_SOFT = '#8B9099';
-const C_RULE = '#E2DDD3';
-const C_BG_SUNKEN = '#F2EFE8';
-const C_DANGER = '#A33A3A';
-const C_DASH_ACCENT = '#B8956A';
-const C_DEBUG_SAFE = '#A33A3A';
-const C_DEBUG_FILL = '#FF94A8';
-const C_DEBUG_BASELINE = '#D4A030';
+const F_BODY = 'Geist, "Segoe UI", system-ui, sans-serif';
 
 // =============================================================================
 // Number / date helpers
@@ -245,36 +106,25 @@ const usd = new Intl.NumberFormat('en-US', {
 });
 const fmt = (cents: number): string => usd.format(cents / 100);
 
-const shortDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-const longDate = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-const slashDate = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
-
-function fmtShortDate(iso: string): string {
-  if (!iso) return '';
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return shortDate.format(d);
-}
+const longDate = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
 function fmtLongDate(iso: string): string {
   if (!iso) return '';
   const d = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
   return longDate.format(d);
 }
-function fmtSlashDate(iso: string): string {
-  if (!iso) return '';
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return slashDate.format(d);
-}
 
-function ageFromDob(iso: string, asOf: Date = new Date()): number {
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return 0;
-  let age = asOf.getFullYear() - d.getFullYear();
-  const m = asOf.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && asOf.getDate() < d.getDate())) age--;
-  return age;
+function ordinalSuffix(n: number): string {
+  const j = n % 10;
+  const k = n % 100;
+  if (j === 1 && k !== 11) return 'st';
+  if (j === 2 && k !== 12) return 'nd';
+  if (j === 3 && k !== 13) return 'rd';
+  return 'th';
 }
 
 const XML_ENT: Record<string, string> = {
@@ -288,230 +138,453 @@ function escapeXml(s: string): string {
   return s.replace(/[<>&"']/g, (c) => XML_ENT[c] as string);
 }
 
-const STALE_TSPAN = `<tspan dx="2" dy="-3" fill="${C_DANGER}" font-size="60%" font-weight="500">*</tspan>`;
-function moneyTspan(cents: number, isStale: boolean): string {
-  return `${escapeXml(fmt(cents))}${isStale ? STALE_TSPAN : ''}`;
-}
-
 // =============================================================================
-// Section + name helpers
+// PAGE 1 — Monthly Cashflow
 // =============================================================================
-export function slotIdToSection(slotId: string): string {
-  if (slotId.startsWith('p1-')) return 'retirement-left';
-  if (slotId.startsWith('p2-')) return 'retirement-right';
-  if (slotId.startsWith('nr-l-')) return 'nonret-left';
-  if (slotId.startsWith('nr-r-')) return 'nonret-right';
-  return '';
-}
 
-export function splitAccountName(name: string): string[] {
-  if (name.length <= 12) return [name];
-  const words = name.split(' ');
-  if (words.length === 1) {
-    return [name.slice(0, 10), name.slice(10)];
-  }
-  let bestSplit = 1;
-  let bestDiff = Infinity;
-  for (let i = 1; i < words.length; i++) {
-    const left = words.slice(0, i).join(' ');
-    const right = words.slice(i).join(' ');
-    const diff = Math.abs(left.length - right.length);
-    if (diff < bestDiff && Math.max(left.length, right.length) <= 14) {
-      bestDiff = diff;
-      bestSplit = i;
-    }
-  }
-  return [words.slice(0, bestSplit).join(' '), words.slice(bestSplit).join(' ')];
-}
+// Reference exact coordinates:
+const P1 = {
+  // Inflow circle: (57.6, 150.84, 261.77, 355.0) → cx=159.68 cy=252.92 r=102.08
+  INFLOW_CX: 159.68,
+  INFLOW_CY: 252.92,
+  INFLOW_R: 102.08,
+  // Outflow circle: (473.45, 150.84, 679.13, 356.52) → cx=576.29 cy=253.68 r=102.84
+  OUTFLOW_CX: 576.29,
+  OUTFLOW_CY: 253.68,
+  OUTFLOW_R: 102.84,
+  // Private Reserve: (269.28, 319.77, 473.45, 523.93) → cx=371.37 cy=421.85 r=102.08
+  RESERVE_CX: 371.37,
+  RESERVE_CY: 421.85,
+  RESERVE_R: 102.08,
+  // Inflow value white box: (93.93, 235.59, 225.39, 263.38) — 131px wide × 28px tall
+  INFLOW_BOX: { x: 93.93, y: 235.59, w: 131.46, h: 27.79 },
+  // Outflow value white box: (509.78, 243.19, 641.24, 270.98)
+  OUTFLOW_BOX: { x: 509.78, y: 243.19, w: 131.46, h: 27.79 },
+  // Inflow→Outflow arrow polygon (red stroke, white fill, hollow)
+  // Vertices from reference:
+  //   (467.95, 243.90) tip
+  //   (427.12, 203.07) head top-left
+  //   (427.12, 223.49) shaft top-left of head
+  //   (274.78, 223.49) shaft top-left
+  //   (274.78, 264.32) shaft bottom-left
+  //   (427.12, 264.32) shaft bottom-left of head
+  //   (427.12, 284.74) head bottom-left
+  //   back to (467.95, 243.90)
+  ARROW_PATH: 'M 274.78 223.49 L 427.12 223.49 L 427.12 203.07 L 467.95 243.90 L 427.12 284.74 L 427.12 264.32 L 274.78 264.32 Z',
+  // Inflow $1,000 Floor horizontal line
+  INFLOW_LINE: { x1: 75.31, x2: 242.78, y: 308.10 },
+  OUTFLOW_LINE: { x1: 492.88, x2: 660.35, y: 313.76 },
+  // Papers icon connector: drawing 8 (horizontal at y≈257.5 from x=649 to x=727)
+  // + drawing 10 (vertical at x=727, y=161 to y=257.8)
+  // + drawing 9 (small left-pointing arrowhead near x=648)
+  // + drawing 24-25 — small filled rects forming the "thick" portion
+  // The line travels from papers icon (x≈686, y≈161) down to outflow circle.
+  // Top of line: x=727, y=161
+  // Bottom of line goes to x=727, y=257.8 (just right of outflow circle)
+  // Then horizontal segment x=727 → x=649 at y=257.5
+  // Then small arrow pointing left ending at x=642
+  // Diamond $ icon — drawing 15 (green filled diamond) and drawing 16 ($ glyph stroke)
+  // Diamond rect: (29.69, 128.87, 98.90, 198.15) — 69×69 rotated diamond
+  // $ glyph rect: (38.53, 137.11, 82.41, 181.65)
+};
 
-// =============================================================================
-// Bubble (Phase 18 — ELLIPSE)
-// =============================================================================
-function bubbleContent(b: TccBubble, anchor: CircleAnchor, debug: boolean): string {
-  const { cx, cy } = anchor;
-  const acctNumLine = b.accountNumberLastFour
-    ? `Acct # &#8226;&#8226;${escapeXml(b.accountNumberLastFour)}`
-    : 'Acct #';
-  const typeLines = splitAccountName(b.accountType);
-  const wrapShift = (typeLines.length - 1) * 12;
+function renderPage1(s: SacsSnapshot, debug: boolean): string {
+  const transferDay = s.outflow.automatedTransferDay;
+  const transferDayWithSuffix = `${transferDay}${ordinalSuffix(transferDay)}`;
 
-  const dir = cx < PAGE_CENTER_X ? 1 : -1;
-  const cashSub =
-    b.cashCents != null
-      ? cashSubBubble(cx + dir * 50, cy + 38, b.cashCents, b.isStale)
-      : '';
+  // Contributor lines below the diamond $ icon
+  const contributors = s.persons.filter(p => p.monthlyInflowCents > 0);
+  const contributorLines = contributors.map((p, i) => {
+    const y = 110 + i * 19;
+    return `<text x="14" y="${y}" font-family="${F_BODY}" font-size="13" font-weight="700" fill="${C_INFLOW_GREEN}">${escapeXml(fmt(p.monthlyInflowCents))}- ${escapeXml(p.firstName)}</text>`;
+  }).join('\n  ');
 
-  const section = slotIdToSection(b.slotId);
-  const lines: string[] = [];
-
-  lines.push(
-    `<text x="${cx}" y="${cy + Y_ACCT_NUM}" text-anchor="middle" dominant-baseline="middle" font-family="var(--font-body), Geist, sans-serif" font-size="${FONT_ACCT}" fill="${C_INK_MUTED}" letter-spacing="0.4">${acctNumLine}</text>`,
-  );
-  lines.push(
-    `<line x1="${cx - 38}" y1="${cy + Y_ACCT_NUM + 6}" x2="${cx + 38}" y2="${cy + Y_ACCT_NUM + 6}" stroke="${C_INK}" stroke-width="0.5"/>`,
-  );
-
-  typeLines.forEach((line, i) => {
-    lines.push(
-      `<text x="${cx}" y="${cy + Y_ACCT_TYPE + i * 12}" text-anchor="middle" dominant-baseline="middle" font-family="var(--font-body), Geist, sans-serif" font-size="${FONT_TYPE}" font-weight="500" fill="${C_INK}">${escapeXml(line)}</text>`,
-    );
-  });
-
-  lines.push(
-    `<text x="${cx}" y="${cy + Y_BALANCE + wrapShift}" text-anchor="middle" dominant-baseline="middle" class="title num" font-family="var(--font-display), 'Source Serif 4', serif" font-size="${FONT_BALANCE}" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(b.balanceCents, b.isStale)}</text>`,
-  );
-
-  lines.push(
-    `<text x="${cx}" y="${cy + Y_DATE + wrapShift}" text-anchor="middle" dominant-baseline="middle" font-family="var(--font-body), Geist, sans-serif" font-size="${FONT_DATE}" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtShortDate(b.asOfDate))}</text>`,
-  );
-
-  const debugOverlay = debug ? bubbleDebugOverlay(cx, cy) : '';
-
-  return `<g class="bubble" data-account-id="${escapeXml(b.accountId)}" data-slot-id="${escapeXml(b.slotId)}" data-section="${section}" data-cx="${cx}" data-cy="${cy}" data-rx="${BUBBLE_RX}" data-ry="${BUBBLE_RY}" data-account-type="${escapeXml(b.accountType)}" data-institution="${escapeXml(b.institution ?? '')}" data-acct-last4="${escapeXml(b.accountNumberLastFour ?? '')}" data-asof="${escapeXml(fmtShortDate(b.asOfDate))}">
-  <ellipse class="bubble-ring" cx="${cx}" cy="${cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="#FFFFFF" stroke="${C_INK}" stroke-width="1.5"/>
-  ${lines.join('\n  ')}
-  ${cashSub}
-  ${debugOverlay}
-</g>`;
-}
-
-function bubbleDebugOverlay(cx: number, cy: number): string {
-  const baselineMarks = [Y_ACCT_NUM, Y_ACCT_TYPE, Y_ACCT_TYPE + 12, Y_BALANCE, Y_DATE]
-    .map(
-      (dy) =>
-        `<line x1="${cx - (BUBBLE_RX - 8)}" y1="${cy + dy}" x2="${cx + (BUBBLE_RX - 8)}" y2="${cy + dy}" stroke="${C_DEBUG_BASELINE}" stroke-width="0.4" opacity="0.6"/>`,
-    )
-    .join('\n  ');
-  return `<g class="bubble-debug" pointer-events="none">
-  <ellipse cx="${cx}" cy="${cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="${C_DEBUG_FILL}" opacity="0.05"/>
-  <ellipse cx="${cx}" cy="${cy}" rx="${BUBBLE_RX - 12}" ry="${BUBBLE_RY - 12}" fill="none" stroke="${C_DEBUG_SAFE}" stroke-width="0.6" stroke-dasharray="2 2" opacity="0.7"/>
-  ${baselineMarks}
-  <text x="${cx}" y="${cy - BUBBLE_RY - 4}" text-anchor="middle" font-family="var(--font-body), Geist, sans-serif" font-size="8" fill="${C_DEBUG_SAFE}">${BUBBLE_RX * 2}×${BUBBLE_RY * 2} / safe ${(BUBBLE_RX - 12) * 2}×${(BUBBLE_RY - 12) * 2}</text>
-</g>`;
-}
-
-function cashSubBubble(cx: number, cy: number, cents: number, isStale: boolean): string {
-  const r = 14;
-  return `<g class="cash-sub">
-  <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_BG_SUNKEN}" stroke="${C_NAVY}" stroke-width="0.5"/>
-  <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="6" fill="${C_INK_MUTED}" letter-spacing="0.4">CASH</text>
-  <text x="${cx}" y="${cy + 6}" text-anchor="middle" class="num" font-size="8" font-weight="500" fill="${C_INK}">${moneyTspan(cents, isStale)}</text>
-</g>`;
-}
-
-// =============================================================================
-// Center elements
-// =============================================================================
-function clientOval(o: OvalAnchor, persons: TccPerson[]): string {
-  // Phase 21 — oval is now circular (rx=ry=50). With smaller dimensions,
-  // collapse text to fit: the 2-person variant uses tighter line spacing
-  // and drops the DOB line (kept SSN for identification, age fits in line).
-  const head = `<ellipse cx="${o.cx}" cy="${o.cy}" rx="${o.rx}" ry="${o.ry}" fill="${C_BLUE_LIGHT}" stroke="${C_NAVY}" stroke-width="1"/>`;
-  if (persons.length === 0) {
-    return `${head}
-    <text x="${o.cx}" y="${o.cy + 4}" text-anchor="middle" font-size="10" fill="#FFFFFF" font-style="italic">No clients</text>`;
-  }
-  if (persons.length === 1) {
-    const p = persons[0]!;
-    const age = ageFromDob(p.dateOfBirth);
-    return `${head}
-    <text x="${o.cx}" y="${o.cy - 14}" text-anchor="middle" class="title" font-size="11" font-weight="500" fill="#FFFFFF">${escapeXml(p.firstName)} ${escapeXml(p.lastName)}</text>
-    <text x="${o.cx}" y="${o.cy - 1}" text-anchor="middle" font-size="8" fill="#FFFFFF">AGE ${age}</text>
-    <text x="${o.cx}" y="${o.cy + 11}" text-anchor="middle" font-size="8" fill="#FFFFFF" class="num">DOB ${escapeXml(fmtSlashDate(p.dateOfBirth))}</text>
-    <text x="${o.cx}" y="${o.cy + 23}" text-anchor="middle" font-size="8" fill="#FFFFFF" class="num">SSN &#8226;&#8226;${escapeXml(p.ssnLastFour)}</text>`;
-  }
-  const [a, b] = persons;
-  if (!a || !b) return head;
-  return `${head}
-  <text x="${o.cx}" y="${o.cy - 18}" text-anchor="middle" class="title" font-size="9" font-weight="500" fill="#FFFFFF">${escapeXml(a.firstName)} ${escapeXml(a.lastName)}</text>
-  <text x="${o.cx}" y="${o.cy - 7}" text-anchor="middle" font-size="7" fill="#FFFFFF" class="num">AGE ${ageFromDob(a.dateOfBirth)} &#183; SSN &#8226;&#8226;${escapeXml(a.ssnLastFour)}</text>
-  <text x="${o.cx}" y="${o.cy + 7}" text-anchor="middle" class="title" font-size="9" font-weight="500" fill="#FFFFFF">${escapeXml(b.firstName)} ${escapeXml(b.lastName)}</text>
-  <text x="${o.cx}" y="${o.cy + 18}" text-anchor="middle" font-size="7" fill="#FFFFFF" class="num">AGE ${ageFromDob(b.dateOfBirth)} &#183; SSN &#8226;&#8226;${escapeXml(b.ssnLastFour)}</text>`;
-}
-
-function trustCircle(c: CircleAnchor, valueCents: number, asOf: string, isStale: boolean, persons: TccPerson[]): string {
-  // Phase 21 — trust shrunk r=70 → 50. Compress internal text to match.
-  const labelTop = persons.length === 2
-    ? `${persons[0]?.firstName ?? 'Client 1'} & ${persons[1]?.firstName ?? 'Client 2'}`
-    : persons[0]?.firstName ?? 'Client 1';
   return `
-  <circle cx="${c.cx}" cy="${c.cy}" r="${c.r}" fill="#FFFFFF" stroke="${C_NAVY}" stroke-width="1.4"/>
-  <text x="${c.cx}" y="${c.cy - 18}" text-anchor="middle" font-size="9" font-weight="500" fill="${C_INK}">${escapeXml(labelTop)}</text>
-  <text x="${c.cx}" y="${c.cy - 6}" text-anchor="middle" font-size="9" font-weight="500" fill="${C_INK}">Family Trust</text>
-  <text x="${c.cx}" y="${c.cy + 10}" text-anchor="middle" class="title num" font-size="14" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(valueCents, isStale)}</text>
-  <text x="${c.cx}" y="${c.cy + 25}" text-anchor="middle" font-size="7" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtShortDate(asOf))}</text>`;
+<!-- ================ PAGE 1 — Monthly Cashflow ================ -->
+
+<!-- White page background -->
+<rect x="0" y="0" width="${CANVAS_W}" height="${CANVAS_H}" fill="${C_WHITE}"/>
+
+<!-- Title (Inter-Bold 21.85, position 146.7,26 → 621.3,52) -->
+<text x="${CANVAS_W / 2}" y="44" text-anchor="middle"
+      font-family="${F_BODY}" font-size="22" font-weight="700"
+      fill="${C_INK}">Simple Automated Cashflow System (SACS)</text>
+
+<!-- "CLIENT NAMES" subtitle (Garet-Bold 18.04, centered, y=64-90) -->
+<text x="${CANVAS_W / 2}" y="82" text-anchor="middle"
+      font-family="${F_BODY}" font-size="18" font-weight="700"
+      fill="${C_INK}">${escapeXml(s.householdName.toUpperCase())}</text>
+
+<!-- Date (CanvaSans-Bold 16, y=97-119) -->
+<text x="${CANVAS_W / 2}" y="113" text-anchor="middle"
+      font-family="${F_BODY}" font-size="16" font-weight="700"
+      fill="${C_INK}">${escapeXml(fmtLongDate(s.meetingDate))}</text>
+
+<!-- Diamond $ icon (drawing 15: green filled rotated square 29.7,128.9,98.9,198.2) -->
+<!-- Reference is a diamond shape (rotated 45° square) with $ glyph inside -->
+<polygon points="65.05,128.87 98.90,165.20 63.54,198.15 29.69,161.82"
+         fill="${C_INFLOW_GREEN}" stroke="none"/>
+<!-- $ glyph as text overlay, white -->
+<text x="60" y="178" text-anchor="middle"
+      font-family="Georgia, 'Times New Roman', serif"
+      font-size="48" font-weight="700"
+      fill="${C_WHITE}">$</text>
+
+<!-- Contributor lines (CanvaSans-Bold 13, green, x=10-153) -->
+${contributorLines}
+
+<!-- INFLOW circle -->
+<circle cx="${P1.INFLOW_CX}" cy="${P1.INFLOW_CY}" r="${P1.INFLOW_R}"
+        fill="${C_INFLOW_GREEN}" stroke="${C_INK}" stroke-width="1"/>
+
+<!-- "INFLOW" label (CanvaSans-Bold 20.27, white, bbox 119.4,180.5 → 200.0,208.1) -->
+<text x="${P1.INFLOW_CX}" y="200"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="20" font-weight="700"
+      fill="${C_WHITE}">INFLOW</text>
+
+<!-- Inflow value white inset box -->
+<rect x="${P1.INFLOW_BOX.x}" y="${P1.INFLOW_BOX.y}"
+      width="${P1.INFLOW_BOX.w}" height="${P1.INFLOW_BOX.h}"
+      fill="${C_WHITE}"/>
+
+<!-- Inflow value text (CanvaSans-Reg 22, GREEN color, on white box) -->
+<text x="${P1.INFLOW_CX}" y="258"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="22" font-weight="400"
+      fill="${C_INFLOW_VALUE}">${escapeXml(fmt(s.inflow.monthlyTotalCents))}</text>
+
+<!-- Inflow $1,000 Floor horizontal black line (drawing 22) -->
+<line x1="${P1.INFLOW_LINE.x1}" y1="${P1.INFLOW_LINE.y}"
+      x2="${P1.INFLOW_LINE.x2}" y2="${P1.INFLOW_LINE.y}"
+      stroke="${C_INK}" stroke-width="3"/>
+
+<!-- "$1,000 Floor" subtext (CanvaSans-Reg 15, BLACK, INSIDE bottom of inflow circle) -->
+<text x="${P1.INFLOW_CX}" y="328"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="15" font-weight="400"
+      fill="${C_INK}">$1,000 Floor</text>
+
+<!-- OUTFLOW circle -->
+<circle cx="${P1.OUTFLOW_CX}" cy="${P1.OUTFLOW_CY}" r="${P1.OUTFLOW_R}"
+        fill="${C_OUTFLOW_RED}" stroke="${C_INK}" stroke-width="1"/>
+
+<!-- "OUTFLOW" label (white) -->
+<text x="${P1.OUTFLOW_CX}" y="204"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="20" font-weight="700"
+      fill="${C_WHITE}">OUTFLOW</text>
+
+<!-- Outflow value white inset box -->
+<rect x="${P1.OUTFLOW_BOX.x}" y="${P1.OUTFLOW_BOX.y}"
+      width="${P1.OUTFLOW_BOX.w}" height="${P1.OUTFLOW_BOX.h}"
+      fill="${C_WHITE}"/>
+
+<!-- Outflow value text (RED on white box) -->
+<text x="${P1.OUTFLOW_CX}" y="265"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="22" font-weight="400"
+      fill="${C_OUTFLOW_VALUE}">${escapeXml(fmt(s.outflow.monthlyTotalCents))}</text>
+
+<!-- Outflow $1,000 Floor line -->
+<line x1="${P1.OUTFLOW_LINE.x1}" y1="${P1.OUTFLOW_LINE.y}"
+      x2="${P1.OUTFLOW_LINE.x2}" y2="${P1.OUTFLOW_LINE.y}"
+      stroke="${C_INK}" stroke-width="3"/>
+
+<text x="${P1.OUTFLOW_CX}" y="333"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="15" font-weight="400"
+      fill="${C_INK}">$1,000 Floor</text>
+
+<!-- Inflow → Outflow hollow chunky arrow (red stroke, white fill) -->
+<rect x="274.77" y="203.07" width="193.31" height="81.66"
+      fill="${C_WHITE}"/>
+<path d="${P1.ARROW_PATH}" fill="${C_WHITE}" stroke="${C_OUTFLOW_RED}" stroke-width="2.5"/>
+
+<!-- Arrow text "X=$11,500/month*" (CanvaSans-Bold 15.09, RED) -->
+<text x="356" y="248"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="15" font-weight="700"
+      fill="${C_OUTFLOW_RED}">X=${escapeXml(fmt(s.outflow.monthlyTotalCents))}/month*</text>
+
+<!-- "Automated transfer on the Nth" italic black BELOW the arrow -->
+<text x="367" y="298"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="12" font-weight="400"
+      fill="${C_INK}">Automated transfer on the ${transferDayWithSuffix}</text>
+
+<!-- PRIVATE RESERVE circle -->
+<circle cx="${P1.RESERVE_CX}" cy="${P1.RESERVE_CY}" r="${P1.RESERVE_R}"
+        fill="${C_RESERVE_BLUE}" stroke="${C_INK}" stroke-width="1"/>
+
+<!-- "PRIVATE" / "RESERVE" white text stacked -->
+<text x="${P1.RESERVE_CX}" y="380"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="20" font-weight="700"
+      fill="${C_WHITE}">PRIVATE</text>
+<text x="${P1.RESERVE_CX}" y="408"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="20" font-weight="700"
+      fill="${C_WHITE}">RESERVE</text>
+
+<!-- Piggy bank with coins (centered in lower part of circle) -->
+<g transform="translate(${P1.RESERVE_CX - 60}, 425)">
+  <!-- Coin stacks left -->
+  <ellipse cx="0" cy="48" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="0" cy="42" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="0" cy="36" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="0" cy="30" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <!-- Coin stacks right -->
+  <ellipse cx="120" cy="48" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="120" cy="42" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="120" cy="36" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <!-- Piggy body -->
+  <ellipse cx="60" cy="35" rx="34" ry="22" fill="#F5A8B8" stroke="#C77A8C" stroke-width="1"/>
+  <!-- Piggy ear -->
+  <path d="M 47 16 L 53 12 L 55 23 Z" fill="#C77A8C"/>
+  <!-- Piggy snout -->
+  <ellipse cx="89" cy="36" rx="9" ry="7" fill="#E08FA0" stroke="#C77A8C" stroke-width="0.6"/>
+  <circle cx="86" cy="34" r="1.4" fill="#5C2E3B"/>
+  <circle cx="92" cy="34" r="1.4" fill="#5C2E3B"/>
+  <!-- Piggy eye -->
+  <circle cx="71" cy="29" r="2" fill="#5C2E3B"/>
+  <circle cx="71.6" cy="28.4" r="0.7" fill="${C_WHITE}"/>
+  <!-- Piggy legs -->
+  <rect x="42" y="55" width="6" height="7" fill="#C77A8C"/>
+  <rect x="74" y="55" width="6" height="7" fill="#C77A8C"/>
+  <!-- Coin in air with $ -->
+  <circle cx="60" cy="3" r="6" fill="#E5B040" stroke="#A37A20" stroke-width="0.8"/>
+  <text x="60" y="6" text-anchor="middle" font-family="serif" font-size="7" fill="#A37A20" font-weight="700">$</text>
+  <!-- Sparkles -->
+  <text x="20" y="8" font-family="${F_BODY}" font-size="10" fill="#E5B040">✦</text>
+  <text x="95" y="12" font-family="${F_BODY}" font-size="9" fill="#E5B040">✦</text>
+</g>
+
+<!-- L-arrow (Inflow bottom → Private Reserve left) — hollow blue -->
+<!-- Vertical descent at x=159.7, from y=355 (inflow bottom) to y=421.85 (PR center) -->
+<!-- Then horizontal at y=421.85, from x=159.7 to x=269.3 (PR left edge) -->
+<!-- Body width = 30px (extracted from $0,000/mo* text bbox suggesting narrow body) -->
+<g class="l-arrow">
+  <!-- Vertical body -->
+  <path d="M 144.7 355 L 174.7 355 L 174.7 406.85 L 244 406.85 L 244 396 L 269.3 421.85 L 244 447.7 L 244 436.85 L 144.7 436.85 Z"
+        fill="${C_WHITE}" stroke="${C_RESERVE_BLUE}" stroke-width="2"/>
+</g>
+
+<!-- L-arrow text "$3,000/mo*" inside horizontal portion -->
+<text x="195" y="426"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="13" font-weight="700"
+      fill="${C_RESERVE_BLUE}">${escapeXml(fmt(s.privateReserve.monthlyContributionCents))}/mo*</text>
+
+<!-- Papers icon at top-right (image embedded in reference; we render as SVG) -->
+<!-- Reference shows roughly at x=686, y=120, ~80x80px -->
+<g transform="translate(686, 60)">
+  <!-- Bottom paper, rotated -->
+  <rect x="0" y="14" width="32" height="38" fill="${C_WHITE}" stroke="${C_INK}" stroke-width="1.4"
+        transform="rotate(-8 16 33)"/>
+  <!-- Middle paper -->
+  <rect x="4" y="6" width="32" height="38" fill="${C_WHITE}" stroke="${C_INK}" stroke-width="1.4"
+        transform="rotate(5 20 25)"/>
+  <!-- Top envelope -->
+  <rect x="0" y="0" width="34" height="22" fill="${C_WHITE}" stroke="${C_INK}" stroke-width="1.6"/>
+  <path d="M 0 0 L 17 13 L 34 0" fill="none" stroke="${C_INK}" stroke-width="1.6"/>
+</g>
+
+<!-- "X= Monthly" / "Expenses" labels — to the RIGHT of icon (text-anchor:start) -->
+<text x="722" y="135"
+      font-family="${F_BODY}" font-size="15" font-weight="400"
+      fill="${C_INK}">X= Monthly</text>
+<text x="722" y="156"
+      font-family="${F_BODY}" font-size="15" font-weight="400"
+      fill="${C_INK}">Expenses</text>
+
+<!-- Connector from papers icon DOWN and curving INTO Outflow circle right edge -->
+<!-- Reference: vertical line at x=727 from y=161 to y=257.8, then leftward arrow from x=649 to x=642 -->
+<line x1="727" y1="161" x2="727" y2="257.5" stroke="${C_INK}" stroke-width="3"/>
+<line x1="727" y1="257.5" x2="649" y2="257.5" stroke="${C_INK}" stroke-width="3"/>
+<!-- Arrowhead pointing left, into the outflow circle -->
+<polygon points="648.74,261.65 642.78,257.10 648.82,252.65" fill="${C_INK}"/>
+
+<!-- Bottom dotted blue arrow + MONTHLY EXPENSES label -->
+<!-- Drawing 18: dotted descent from PR bottom (cy+r ≈ 524) to y=566, x≈372 -->
+<g class="monthly-expenses-stem">
+  <!-- Dotted line -->
+  ${[0,1,2,3,4,5,6].map(i => `<rect x="370" y="${524 + i * 6}" width="4" height="3" fill="${C_RESERVE_BLUE}"/>`).join('\n  ')}
+  <!-- Arrow tip -->
+  <polygon points="367.76,560.71 376.76,560.71 372.41,566.82" fill="${C_RESERVE_BLUE}"/>
+</g>
+
+<!-- "MONTHLY EXPENSES" label (Garet-Bold 18.04, BLACK, bottom-center) -->
+<text x="${CANVAS_W / 2}" y="552"
+      text-anchor="middle"
+      font-family="${F_BODY}" font-size="18" font-weight="700"
+      fill="${C_INK}">MONTHLY   EXPENSES</text>
+
+${debug ? `<rect x="0" y="0" width="${CANVAS_W}" height="${CANVAS_H}" fill="none" stroke="orange" stroke-width="1" stroke-dasharray="4 4"/>` : ''}
+`;
 }
 
 // =============================================================================
-// Banners (navy)
+// PAGE 2 — Long-Term Cashflow
 // =============================================================================
-function navyBanner(x: number, y: number, w: number, h: number, leftLabel: string, rightAmountCents: number): string {
+
+const P2 = {
+  // Pinnacle PR circle: (57.6, 170.17, 261.77, 374.33) → cx=159.68 cy=272.25 r=102.08
+  PINNACLE_CX: 159.68,
+  PINNACLE_CY: 272.25,
+  PINNACLE_R: 102.08,
+  // Schwab circle: (488.52, 170.17, 692.69, 374.33) → cx=590.61 cy=272.25 r=102.08
+  SCHWAB_CX: 590.61,
+  SCHWAB_CY: 272.25,
+  SCHWAB_R: 102.08,
+  // Pinnacle value white box: (93.93, 274.10, 225.39, 301.90)
+  PINNACLE_BOX: { x: 93.93, y: 274.10, w: 131.46, h: 27.79 },
+  // Schwab value white box: (525.02, 261.65, 656.49, 289.44)
+  SCHWAB_BOX: { x: 525.02, y: 261.65, w: 131.46, h: 27.79 },
+  // Bidirectional arrow region: (275.52, 230.66, 474.72, 313.85)
+  // 199px wide, 83px tall, complex polygon (10 items)
+};
+
+function renderPage2(s: SacsSnapshot, debug: boolean): string {
+  const sixMo = s.privateReserve.breakdown.sixMonthsExpensesCents;
+  const homeowner = s.privateReserve.breakdown.homeownerDeductibleCents;
+  const auto = s.privateReserve.breakdown.autoDeductibleCents;
+  const medical = s.privateReserve.breakdown.medicalDeductibleCents;
+
   return `
-  <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${C_NAVY}"/>
-  <text x="${x + 16}" y="${y + h * 0.7}" font-size="11" font-weight="500" letter-spacing="2" fill="#FFFFFF">${escapeXml(leftLabel)}</text>
-  <text x="${x + w - 16}" y="${y + h * 0.7}" text-anchor="end" class="num" font-size="13" font-weight="500" fill="#FFFFFF">${escapeXml(fmt(rightAmountCents))}</text>`;
+<!-- ================ PAGE 2 — Long-Term Cashflow ================ -->
+
+<!-- White page background -->
+<rect x="0" y="0" width="${CANVAS_W}" height="${CANVAS_H}" fill="${C_WHITE}"/>
+
+<!-- Title only (NO household name, NO date — reference page 2 is title-only) -->
+<text x="${CANVAS_W / 2}" y="44" text-anchor="middle"
+      font-family="${F_BODY}" font-size="22" font-weight="700"
+      fill="${C_INK}">Simple Automated Cashflow System (SACS)</text>
+
+<!-- Dotted descent arrow from title to bidirectional arrows below -->
+<g class="title-descent">
+  ${[0,1,2,3,4,5,6,7,8,9,10,11,12,13].map(i => `<rect x="372" y="${60 + i * 10}" width="3" height="6" fill="${C_SUBTITLE_BLUE}"/>`).join('\n  ')}
+  <polygon points="370.64,191.45 379.64,191.45 375.14,197.45" fill="${C_SUBTITLE_BLUE}"/>
+</g>
+
+<!-- PINNACLE PR circle -->
+<circle cx="${P2.PINNACLE_CX}" cy="${P2.PINNACLE_CY}" r="${P2.PINNACLE_R}"
+        fill="${C_PINNACLE_BLUE}" stroke="${C_INK}" stroke-width="1"/>
+
+<!-- "PINNACLE" / "PR" stacked white text -->
+<text x="${P2.PINNACLE_CX}" y="222"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="20" font-weight="700"
+      fill="${C_WHITE}">PINNACLE</text>
+<text x="${P2.PINNACLE_CX}" y="250"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="20" font-weight="700"
+      fill="${C_WHITE}">PR</text>
+
+<!-- White inset box -->
+<rect x="${P2.PINNACLE_BOX.x}" y="${P2.PINNACLE_BOX.y}"
+      width="${P2.PINNACLE_BOX.w}" height="${P2.PINNACLE_BOX.h}"
+      fill="${C_WHITE}"/>
+
+<!-- Pinnacle value (light blue color, ~22pt) -->
+<text x="${P2.PINNACLE_CX}" y="296"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="22" font-weight="400"
+      fill="${C_PINNACLE_TEXT}">${escapeXml(fmt(s.privateReserve.targetCents))}</text>
+
+<!-- "$X TARGET" inside circle BELOW value box (Garet-Bold 12, BLACK) -->
+<text x="${P2.PINNACLE_CX}" y="335"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="12" font-weight="700"
+      fill="${C_INK}">${escapeXml(fmt(s.privateReserve.targetCents))} TARGET</text>
+
+<!-- SCHWAB circle -->
+<circle cx="${P2.SCHWAB_CX}" cy="${P2.SCHWAB_CY}" r="${P2.SCHWAB_R}"
+        fill="${C_SCHWAB_NAVY}" stroke="${C_INK}" stroke-width="1"/>
+
+<!-- "SCHWAB" white text top -->
+<text x="${P2.SCHWAB_CX}" y="222"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="20" font-weight="700"
+      fill="${C_WHITE}">SCHWAB</text>
+
+<!-- White inset box -->
+<rect x="${P2.SCHWAB_BOX.x}" y="${P2.SCHWAB_BOX.y}"
+      width="${P2.SCHWAB_BOX.w}" height="${P2.SCHWAB_BOX.h}"
+      fill="${C_WHITE}"/>
+
+<!-- Schwab value (navy color on white) -->
+<text x="${P2.SCHWAB_CX}" y="284"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="22" font-weight="400"
+      fill="${C_SCHWAB_TEXT}">${escapeXml(fmt(s.schwab.valueCents))}</text>
+
+<!-- "BROKERAGE" white text below value box -->
+<text x="${P2.SCHWAB_CX}" y="332"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="20" font-weight="700"
+      fill="${C_WHITE}">BROKERAGE</text>
+
+<!-- "Remainder" BELOW Schwab circle (CanvaSans-Bold 15, BLACK) -->
+<text x="${P2.SCHWAB_CX}" y="400"
+      text-anchor="middle" dominant-baseline="alphabetic"
+      font-family="${F_BODY}" font-size="15" font-weight="700"
+      fill="${C_INK}">Remainder</text>
+
+<!-- Bidirectional bowtie arrow between PINNACLE and SCHWAB -->
+<!-- Reference rect: (275.52, 230.66, 474.72, 313.85) -->
+<!-- Center y: 272.25 (between the two circles) -->
+<!-- Two solid filled blue arrows touching in middle -->
+<g class="bowtie-arrows">
+  <!-- Left arrow (points LEFT toward Pinnacle PR) -->
+  <polygon points="370,250 370,260 320,260 320,247 280,272 320,297 320,284 370,284 370,295 370,295"
+           fill="${C_RESERVE_BLUE}" stroke="none"/>
+  <!-- Right arrow (points RIGHT toward Schwab) -->
+  <polygon points="380,250 380,260 430,260 430,247 470,272 430,297 430,284 380,284 380,295"
+           fill="${C_RESERVE_BLUE}" stroke="none"/>
+</g>
+
+<!-- Subtext list below Pinnacle PR (CanvaSans-Bold 12, BLACK, centered) -->
+<g class="target-breakdown">
+  <text x="${P2.PINNACLE_CX}" y="395" text-anchor="middle"
+        font-family="${F_BODY}" font-size="12" font-weight="700"
+        fill="${C_INK}">6x Monthly Expenses + Deductible= ${escapeXml(fmt(sixMo))}</text>
+  <text x="${P2.PINNACLE_CX}" y="412" text-anchor="middle"
+        font-family="${F_BODY}" font-size="12" font-weight="700"
+        fill="${C_INK}">${escapeXml(fmt(homeowner))}- Homeowner</text>
+  <text x="${P2.PINNACLE_CX}" y="429" text-anchor="middle"
+        font-family="${F_BODY}" font-size="12" font-weight="700"
+        fill="${C_INK}">${escapeXml(fmt(auto))} x 2 = ${escapeXml(fmt(auto * 2))}- Auto</text>
+  <text x="${P2.PINNACLE_CX}" y="446" text-anchor="middle"
+        font-family="${F_BODY}" font-size="12" font-weight="700"
+        fill="${C_INK}">${escapeXml(fmt(medical))}- Medical<tspan fill="${C_OUTFLOW_RED}">*</tspan></text>
+</g>
+
+<!-- "LONG TERM CASHFLOW" footer (Garet-Bold 18.04, BLACK) -->
+<text x="${CANVAS_W / 2}" y="535" text-anchor="middle"
+      font-family="${F_BODY}" font-size="18" font-weight="700"
+      fill="${C_INK}">LONG TERM CASHFLOW</text>
+
+<!-- "( Magnified Private Reserve Cashflow)" subtitle BOLD blue -->
+<text x="${CANVAS_W / 2}" y="558" text-anchor="middle"
+      font-family="${F_BODY}" font-size="17" font-weight="700"
+      fill="${C_SUBTITLE_BLUE}">( Magnified Private Reserve Cashflow)</text>
+
+${debug ? `<rect x="0" y="0" width="${CANVAS_W}" height="${CANVAS_H}" fill="none" stroke="orange" stroke-width="1" stroke-dasharray="4 4"/>` : ''}
+`;
 }
 
 // =============================================================================
-// Liabilities pill (header) and box (between trust and NR row 2)
+// SVG WRAPPER
 // =============================================================================
-function liabilitiesPill(totalCents: number, asOf: string, x: number, y: number): string {
-  if (totalCents <= 0) return '';
-  const w = 260;
-  const h = 36;
-  const cy = y + h / 2;
-  return `
-  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="999" fill="${C_BG_SUNKEN}" stroke="${C_RULE}" stroke-width="1"/>
-  <text x="${x + 14}" y="${cy}" dominant-baseline="middle" font-family="var(--font-body)" font-size="11" font-weight="500" letter-spacing="0.08em" fill="${C_INK_SOFT}">LIABILITIES</text>
-  <text x="${x + w - 14}" y="${cy}" dominant-baseline="middle" text-anchor="end" class="num" font-size="13" font-weight="500" fill="${C_INK}">${escapeXml(fmt(totalCents))} &#183; ${escapeXml(fmtShortDate(asOf))}</text>`;
-}
-
-function liabilitiesBox(liabs: TccLiability[], x: number, y: number, w: number, h: number, maxRows = 2): string {
-  // Phase 21 — fixed height (was content-dependent). Box sits in the
-  // 40 px corridor between trust bottom (y=770) and NR row 2 top (y=820).
-  // Up to 2 liabilities fit. More are summarised as "+ N more".
-  const PAD_X = 14;
-  const PAD_Y = 6;
-  const HEADER_H = 12;
-  const ROW_H = 11;
-  const rows = liabs.slice(0, maxRows);
-  const moreCount = liabs.length - rows.length;
-
-  const lines = rows
-    .map((l, i) => {
-      const y0 = y + PAD_Y + HEADER_H + (i + 1) * ROW_H - 2;
-      const ratePart = l.interestRateBps != null ? ` @ ${(l.interestRateBps / 100).toFixed(2)}%` : '';
-      const payoffPart = l.payoffDate ? `, pay off ${fmtShortDate(l.payoffDate)}` : '';
-      return `<text x="${x + PAD_X}" y="${y0}" font-size="8" fill="${C_INK_MUTED}" class="num">
-        <tspan font-weight="500" fill="${C_INK}">${escapeXml(l.creditorName)}</tspan>${l.liabilityType ? ` <tspan>(${escapeXml(l.liabilityType)})</tspan>` : ''} <tspan>${escapeXml(fmt(l.balanceCents))}</tspan><tspan>${escapeXml(ratePart + payoffPart)}</tspan>${l.isStale ? STALE_TSPAN : ''}
-      </text>`;
-    })
-    .join('');
-  const moreLine = moreCount > 0
-    ? `<text x="${x + w - PAD_X}" y="${y + h - PAD_Y - 2}" text-anchor="end" font-size="8" font-style="italic" fill="${C_INK_SOFT}">+ ${moreCount} more</text>`
-    : '';
-  return `
-  <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${C_BG_SUNKEN}" stroke="${C_RULE}" stroke-width="0.8"/>
-  <text x="${x + PAD_X}" y="${y + PAD_Y + 8}" font-size="9" font-weight="500" letter-spacing="1.5" fill="${C_INK_MUTED}">LIABILITIES</text>
-  ${lines}
-  ${moreLine}`;
-}
-
-// =============================================================================
-// Stale footnote + side labels + svg wrap
-// =============================================================================
-function staleFootnote(): string {
-  return `<text x="780" y="${FOOTNOTE_Y}" text-anchor="end" font-size="9" font-style="italic" fill="${C_DANGER}">
-  <tspan fill="${C_DANGER}">*</tspan> Indicates we do not have up to date information
-</text>`;
-}
-
-function sideLabel(text: string, x: number, cy: number, rotate: number, color: string): string {
-  return `<text transform="rotate(${rotate} ${x} ${cy})" x="${x}" y="${cy}" text-anchor="middle" font-size="11" font-weight="500" letter-spacing="3" fill="${color}">${escapeXml(text)}</text>`;
-}
 
 function svgWrap(content: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" width="${CANVAS_W}" height="${CANVAS_H}" fill="${C_INK}">
+  return `<svg xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 ${CANVAS_W} ${CANVAS_H}"
+              width="${CANVAS_W}"
+              height="${CANVAS_H}"
+              fill="${C_INK}">
 <defs>
 <style><![CDATA[${FONT_FACE_CSS}]]></style>
 </defs>
@@ -519,151 +592,17 @@ ${content}
 </svg>`;
 }
 
-function slotIndicators(layout: TccBubbleLayout): string {
-  const both = {
-    ...layout.retirementSlots,
-    ...layout.nonRetirementSlots,
-  };
-  return Object.entries(both)
-    .map(([slotId, a]) => {
-      const section = slotIdToSection(slotId);
-      return `<ellipse class="slot" data-slot-id="${escapeXml(slotId)}" data-section="${section}" data-cx="${a.cx}" data-cy="${a.cy}" cx="${a.cx}" cy="${a.cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="none" stroke="${C_DASH_ACCENT}" stroke-width="1" stroke-dasharray="4 3" opacity="0"></ellipse>`;
-    })
-    .join('');
-}
+// =============================================================================
+// MAIN ENTRY POINT
+// =============================================================================
 
-// =============================================================================
-// Main render
-// =============================================================================
-export function renderTccSvg(
-  s: TccSnapshot,
-  layout: TccBubbleLayout = DEFAULT_TCC_LAYOUT,
+export function renderSacsSvg(
+  s: SacsSnapshot,
   options: RenderOptions = {},
-): { page1: string } {
+): { page1: string; page2: string } {
   const debug = options.debug === true;
-  const hasStale = s.staleFields.size > 0 || s.retirementBubbles.some((b) => b.isStale) || s.nonRetirementBubbles.some((b) => b.isStale) || s.trust.isStale || s.liabilities.some((l) => l.isStale);
-
-  const header = `
-  <text x="22" y="24" font-size="9" font-weight="500" letter-spacing="1.5" fill="${C_INK_MUTED}">NAME</text>
-  <text x="60" y="24" font-size="11" fill="${C_INK}">${escapeXml(s.householdName)}</text>
-  <text x="22" y="44" font-size="9" font-weight="500" letter-spacing="1.5" fill="${C_INK_MUTED}">DATE</text>
-  <text x="60" y="44" class="num" font-size="11" fill="${C_INK}">${escapeXml(fmtLongDate(s.meetingDate))}</text>
-
-  <rect x="320" y="6" width="152" height="48" fill="${C_NAVY}"/>
-  <text x="396" y="22" text-anchor="middle" font-size="9" font-weight="500" letter-spacing="3" fill="#FFFFFF">GRAND TOTAL</text>
-  <text x="396" y="46" text-anchor="middle" class="title num" font-size="20" font-weight="500" fill="#FFFFFF">${moneyTspan(s.totals.grandTotalCents, false)}</text>
-
-  ${liabilitiesPill(s.totals.liabilitiesTotalCents, s.asOfDate, 500, 12)}`;
-
-  // Phase 22 — self-healing slot remap. If a bubble's saved slotId
-  // doesn't exist in the current grid (e.g. left over from a pre-Phase-21
-  // schema with different slot IDs), find the next available default slot
-  // for that bubble's spouse. Prevents lopsided rendering after schema
-  // changes without requiring a DB migration.
-  const RET_P1_FILL = ['p1-1', 'p1-2', 'p1-3', 'p1-4', 'p1-5', 'p1-6'];
-  const RET_P2_FILL = ['p2-1', 'p2-2', 'p2-3', 'p2-4', 'p2-5', 'p2-6'];
-
-  const retPlaced = (() => {
-    const used = new Set<string>();
-    const items = s.retirementBubbles.map((b) => {
-      const a = layout.retirementSlots[b.slotId];
-      if (a) {
-        used.add(b.slotId);
-        return { bubble: b, anchor: a };
-      }
-      return { bubble: b, anchor: null as CircleAnchor | null };
-    });
-    for (const item of items) {
-      if (item.anchor !== null) continue;
-      // Determine spouse from the saved slotId prefix (falls back to p1)
-      const fillOrder = item.bubble.slotId.startsWith('p2-') ? RET_P2_FILL : RET_P1_FILL;
-      const free = fillOrder.find(
-        (slotId) => !used.has(slotId) && layout.retirementSlots[slotId],
-      );
-      if (free) {
-        item.anchor = layout.retirementSlots[free]!;
-        used.add(free);
-      }
-    }
-    return items;
-  })();
-
-  const retBubbles = retPlaced
-    .filter((item) => item.anchor !== null)
-    .map((item) => bubbleContent(item.bubble, item.anchor!, debug))
-    .join('');
-
-  const retSection = `
-  ${sideLabel('QUALIFIED', 14, CLIENT_OVAL_CY, -90, C_BLUE_LIGHT)}
-  ${sideLabel('QUALIFIED', 778, CLIENT_OVAL_CY, 90, C_BLUE_LIGHT)}
-  ${clientOval(layout.clientOval, s.persons)}
-  ${retBubbles}
-  ${navyBanner(20, RET_BANNER_Y, 752, RET_BANNER_H, 'RETIREMENT ONLY', s.totals.p1RetirementCents + s.totals.p2RetirementCents)}`;
-
-  const divider = `<line x1="20" y1="${DIVIDER_Y}" x2="772" y2="${DIVIDER_Y}" stroke="${C_RULE}" stroke-width="1"/>`;
-
-  // Phase 22 — self-healing NR slot remap. Symmetric default fill order
-  // (left/right alternating) ensures any TCC with the same number of NR
-  // accounts has the same physical layout, regardless of slot history.
-  const NR_DEFAULT_FILL = [
-    'nr-l-1', 'nr-r-1', 'nr-l-2', 'nr-r-2',
-    'nr-l-3', 'nr-r-3', 'nr-l-4', 'nr-r-4',
-  ];
-
-  const nrPlaced = (() => {
-    const used = new Set<string>();
-    const items = s.nonRetirementBubbles.map((b) => {
-      const a = layout.nonRetirementSlots[b.slotId];
-      if (a) {
-        used.add(b.slotId);
-        return { bubble: b, anchor: a };
-      }
-      return { bubble: b, anchor: null as CircleAnchor | null };
-    });
-    for (const item of items) {
-      if (item.anchor !== null) continue;
-      const free = NR_DEFAULT_FILL.find(
-        (slotId) => !used.has(slotId) && layout.nonRetirementSlots[slotId],
-      );
-      if (free) {
-        item.anchor = layout.nonRetirementSlots[free]!;
-        used.add(free);
-      }
-    }
-    return items;
-  })();
-
-  const nrBubbles = nrPlaced
-    .filter((item) => item.anchor !== null)
-    .map((item) => bubbleContent(item.bubble, item.anchor!, debug))
-    .join('');
-
-  const trust = layout.trustCircle;
-  // Phase 21 — liab box positioned in the trust→row-2 corridor.
-  // Wider (260px) and centered horizontally for better readability.
-  const liabBoxW = 320;
-  const liabBoxX = (CANVAS_W - liabBoxW) / 2;
-  const nrSection = `
-  ${sideLabel('NON QUALIFIED', 14, NR_TCY, -90, C_BLUE_LIGHT)}
-  ${sideLabel('NON QUALIFIED', 778, NR_TCY, 90, C_BLUE_LIGHT)}
-  ${trustCircle(trust, s.trust.valueCents, s.trust.asOfDate, s.trust.isStale, s.persons)}
-  ${nrBubbles}
-  ${s.liabilities.length > 0 ? liabilitiesBox(s.liabilities, liabBoxX, LIAB_BOX_Y, liabBoxW, LIAB_BOX_H) : ''}
-  ${navyBanner(20, NR_BANNER_Y, 752, NR_BANNER_H, 'NON RETIREMENT TOTAL', s.totals.nonRetirementCents + s.totals.trustCents)}`;
-
-  const slots = slotIndicators(layout);
-  const debugBg = debug
-    ? `<rect width="${CANVAS_W}" height="${CANVAS_H}" fill="#FFF4E5" opacity="0.4"/>`
-    : '';
-  const content = `
-  <rect width="${CANVAS_W}" height="${CANVAS_H}" fill="#FFFFFF"/>
-  ${debugBg}
-  ${header}
-  ${slots}
-  ${retSection}
-  ${divider}
-  ${nrSection}
-  ${hasStale ? staleFootnote() : ''}`;
-
-  return { page1: svgWrap(content) };
+  return {
+    page1: svgWrap(renderPage1(s, debug)),
+    page2: svgWrap(renderPage2(s, debug)),
+  };
 }
