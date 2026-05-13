@@ -140,7 +140,9 @@
       "PowerShell(pnpm exec *)",
       "PowerShell(curl -s -o $null -w \"healthz=%{http_code}`n\" http://127.0.0.1:3000/healthz)",
       "Read(//c/Program Files/LibreOffice/program/**)",
-      "Read(//c/Program Files \\(x86\\)/LibreOffice/program/**)"
+      "Read(//c/Program Files \\(x86\\)/LibreOffice/program/**)",
+      "Bash(/c/Windows/system32/convert --version)",
+      "PowerShell(Remove-Item *)"
     ]
   }
 }

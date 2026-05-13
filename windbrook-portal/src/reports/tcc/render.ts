@@ -1,52 +1,42 @@
 /**
- * TCC (Total Client Chart) renderer.
+ * TCC (Total Client Chart) renderer — Phase 33 structural rebuild.
  *
- * Phase 21 spacing rebuild. Phase 20 fixed client-oval overlap but left two
- * residual issues:
- *   • Adjacent bubbles in the same row (cx=100 + cx=240) had touching edges
- *     at x=170 — no air between them. Roth IRA and IRA Rollover sat flush.
- *   • NR row 1 bubbles at cy=530 with ry=55 ended at y=585. Trust circle
- *     started at cy-r=620-70=550, but inner-col bubbles at cx=240 (right
- *     edge x=310) had only 16 px clearance from the trust left edge x=326.
- *     Combined with the divider at y=520, NR row 1 bubbles visually
- *     "crashed into" the divider line.
+ * New container hierarchy matches the reference Word template:
  *
- * Phase 21 reset all spacing using verified math. Every gap is now ≥10 px.
+ *  1. Header — NAME/DATE eyebrow pair top-left, no big serif title
+ *  2. Grand Total — centered navy box at top with Liabilities total + a/o
+ *     date as a small line BELOW the box
+ *  3. Qualified section — paired horizontal "QUALIFIED" corner badges,
+ *     large light-blue central Client bubble, retirement bubbles
+ *     symmetrically left/right of it
+ *  4. "Retirement Only" centered divider badge (small, NOT full-width)
+ *  5. Non-Qualified section — paired "NON-QUALIFIED" corner badges,
+ *     large white central Trust bubble, non-retirement bubbles
+ *     symmetrically left/right of it
+ *  6. Liabilities table — grey rounded table at bottom-center, one row
+ *     per liability (lender / balance / rate / payoff)
+ *  7. Footer — "NON RETIREMENT TOTAL" centered small badge, permanent
+ *     red disclaimer pinned bottom-right (always rendered, not gated on
+ *     stale state)
  *
- *   Cols: 100, 270, 522, 692 (4 cols).
- *     Outer→Inner gap: 270-70 - (100+70) = 30 px. (Was 0.)
- *   Retirement: 3 rows at cy=125, 270, 415. Client oval rx=50 (was 80).
- *     Inner bubble right-edge x=340; client oval left-edge x=346 → 6 px.
- *   NR: 2 rows at cy=595, 875. Trust at cy=720, r=50 (was 70).
- *     Inner-col bubble right-edge x=340; trust left-edge x=346 → 6 px.
- *   Liabilities box now sits between trust (bottom y=770) and NR row 2
- *     (top y=820), in the 40-px corridor y=775-815. Compact 2-row layout.
- *   Canvas H grew 820 → 1000 to absorb the cleaner spacing. The PDF
- *     export already uses the SVG viewBox so US Letter scaling stays
- *     correct at print time.
+ * Slot grid replaced. New slot IDs:
+ *   qualified-left-1..3   (Client 1 retirement, default 2 slots)
+ *   qualified-right-1..3  (Client 2 retirement, default 2 slots)
+ *   non-qualified-left-1..3  (non-retirement left column)
+ *   non-qualified-right-1..3 (non-retirement right column)
  *
- * Slot ID schema MOSTLY preserved (24 → 20):
- *   p1-1..6, p2-1..6 (12 retirement slots — unchanged)
- *   nr-l-1..4, nr-r-1..4 (8 NR slots — was 12)
+ * data-section values on bubbles + slots remain consistent with the
+ * keys the drag JS (public/js/layout-editor.js) checks against:
+ *   qualified-left / qualified-right / non-qualified-left / non-qualified-right.
  *
- * Saved layouts that referenced nr-l-5/6 or nr-r-5/6 will silently fall
- * back to default placement when those slot IDs are absent. The layout
- * route (`POST /clients/:cid/reports/:rid/layout`) already validates the
- * target slot exists before persisting, so future drag-saves can only
- * land on the new 8-slot grid.
+ * Phase-22 self-healing slot remap preserved — bubbles whose saved
+ * slotId is missing from the current grid fall through to the next
+ * available default slot for their side, so old `p1-*`/`p2-*`/`nr-*`
+ * layouts in `bubble_layouts` render symmetrically until the
+ * phase33-clear-tcc-layouts migration purges them.
  *
- * NR section now has 8 slots (was 12). Park-Rivera (5 NR accounts) fills
- * row 1 fully (4 cols) plus 1 of row 2 — visually balanced. Cole (2 NR)
- * fills 2 slots on row 1 (1 per side). Lipski (3 NR) fills row 1 left
- * + row 1 right + row 1 inner-left.
- *
- * Phase 18 — bubbles are ELLIPSES (140×110). Phase 19 — Canva s256 fix.
- * Phase 20 — drag silent-snap-back fix in layout-editor.js.
- * Phase 22 — self-healing slot remap so saved layouts that reference
- * deprecated slot IDs (from before slot-grid changes) automatically
- * fall through to the next available default slot. Combined with the
- * `pnpm db:migrate:phase22` migration that clears stale TCC layouts,
- * every TCC report now renders with consistent shape.
+ * The bubble internals (account #, type, balance, a/o date) are
+ * unchanged from Phase 18+. Only the surrounding skeleton changes.
  */
 import { FONT_FACE_CSS } from '../_fonts.js';
 
@@ -115,7 +105,7 @@ export interface TccSnapshot {
 
 export interface TccBubbleLayout {
   clientOval: OvalAnchor;
-  trustCircle: CircleAnchor;
+  trustCircle: OvalAnchor;
   retirementSlots: Record<string, CircleAnchor>;
   nonRetirementSlots: Record<string, CircleAnchor>;
 }
@@ -125,115 +115,116 @@ export interface RenderOptions {
 }
 
 // =============================================================================
-// Phase 21 spacing — DO NOT MODIFY
+// Canvas + section geometry
 // =============================================================================
-const BUBBLE_RX = 70;
-const BUBBLE_RY = 55;
-
-const Y_ACCT_NUM = -32;
-const Y_ACCT_TYPE = -10;
-const Y_BALANCE = +12;
-const Y_DATE = +34;
-
-const FONT_ACCT = 9;
-const FONT_TYPE = 12;
-const FONT_BALANCE = 15;
-const FONT_DATE = 9;
-
-// Phase 21 — trust shrunk r=70 → 50 to give inner-col bubbles 6px clearance.
-const TRUST_RADIUS = 50;
-
-// Client oval — circular (rx=ry=50) so it visually balances the trust circle.
-const CLIENT_OVAL_RX = 50;
-const CLIENT_OVAL_RY = 50;
-
 const CANVAS_W = 792;
-// Phase 21 — H grown 820 → 1000 to absorb 3 ret rows + 2 NR rows + liab box
-// + banners with ≥10 px gaps everywhere.
 const CANVAS_H = 1000;
 const PAGE_CENTER_X = CANVAS_W / 2;
 
-// Columns — 4 cols, 30 px between adjacent right/left edges.
-//   100, 270, 522, 692
-//   Outer right edge: 100 + 70 = 170
-//   Inner left edge:  270 - 70 = 200
-//   Gap: 30 px
-const COL_LEFT_OUTER = 100;
-const COL_LEFT_INNER = 270;
-const COL_RIGHT_INNER = 522; // = CANVAS_W - 270
-const COL_RIGHT_OUTER = 692; // = CANVAS_W - 100
+// Account bubbles: 130 × 90 (rx=65, ry=45). Smaller than central bubbles.
+const BUBBLE_RX = 65;
+const BUBBLE_RY = 45;
 
-// Retirement section: y=0 to y=480 (banner). 3 rows + client oval.
-const RET_ROW_CY = [125, 270, 415] as const;
-const RET_BANNER_Y = 480;
-const RET_BANNER_H = 20;
-const DIVIDER_Y = 520;
-const CLIENT_OVAL_CY = 270;
+// Bubble internal text positions (relative to bubble cy).
+const Y_ACCT_NUM = -28;
+const Y_ACCT_TYPE = -8;
+const Y_BALANCE = +14;
+const Y_DATE = +32;
 
-// NR section: y=540 (above row 1) to y=945 (banner). 2 rows + trust + liab.
-const NR_ROW_CY = [595, 875] as const;
-const NR_TCY = 720;
-const LIAB_BOX_Y = 775;
-const LIAB_BOX_H = 40;
-const NR_BANNER_Y = 945;
-const NR_BANNER_H = 20;
-const FOOTNOTE_Y = 975;
+const FONT_ACCT = 8;
+const FONT_TYPE = 11;
+const FONT_BALANCE = 14;
+const FONT_DATE = 8;
+
+// Central client oval (Qualified section) — light blue.
+const CLIENT_OVAL_RX = 90;
+const CLIENT_OVAL_RY = 50;
+const CLIENT_OVAL_CY = 305;
+
+// Central trust oval (Non-Qualified section) — white.
+const TRUST_OVAL_RX = 90;
+const TRUST_OVAL_RY = 55;
+const TRUST_OVAL_CY = 700;
+
+// Side columns for account bubbles.
+const COL_LEFT = 140;
+const COL_RIGHT = 652;
+
+// Qualified rows. Default two per side (top + bottom). Optional 3rd
+// slot at the row-mid y sits beside the client oval — used only when
+// a household has 5–6 retirement accounts on one side.
+const QUAL_ROW_TOP = 220;
+const QUAL_ROW_MID = 305;
+const QUAL_ROW_BOT = 390;
+
+// Non-Qualified rows — three per side stacked. The middle row sits at
+// the trust's vertical center but in the side columns clear of it.
+const NQ_ROW_TOP = 600;
+const NQ_ROW_MID = 700;
+const NQ_ROW_BOT = 800;
+
+// Section corner badges (paired). Y values placed in clear bands above
+// each section's bubble row 1 so the badges aren't hidden under the
+// bubble ellipses (bubbles are painted after badges in document order).
+const QUAL_BADGE_Y = 140;
+const NQ_BADGE_Y = 520;
+
+// Retirement Only centered divider band.
+const RET_DIVIDER_Y = 470;
+
+// Liabilities table position — below NQ row 3 with breathing room.
+const LIAB_TABLE_W = 440;
+const LIAB_TABLE_X = (CANVAS_W - LIAB_TABLE_W) / 2;
+const LIAB_TABLE_Y = 860;
+
+// NON RETIREMENT TOTAL centered badge.
+const NQ_TOTAL_BADGE_Y = 940;
 
 // =============================================================================
 // Slot grids
 // =============================================================================
-function makeRetirementSlots(): Record<string, CircleAnchor> {
-  const slots: Record<string, CircleAnchor> = {};
-  let i1 = 1;
-  let i2 = 1;
-  for (const cy of RET_ROW_CY) {
-    slots[`p1-${i1++}`] = { cx: COL_LEFT_OUTER, cy, r: BUBBLE_RX };
-    slots[`p1-${i1++}`] = { cx: COL_LEFT_INNER, cy, r: BUBBLE_RX };
-    slots[`p2-${i2++}`] = { cx: COL_RIGHT_INNER, cy, r: BUBBLE_RX };
-    slots[`p2-${i2++}`] = { cx: COL_RIGHT_OUTER, cy, r: BUBBLE_RX };
-  }
-  return slots;
+function makeQualifiedSlots(): Record<string, CircleAnchor> {
+  return {
+    'qualified-left-1': { cx: COL_LEFT, cy: QUAL_ROW_TOP, r: BUBBLE_RX },
+    'qualified-left-2': { cx: COL_LEFT, cy: QUAL_ROW_BOT, r: BUBBLE_RX },
+    'qualified-left-3': { cx: COL_LEFT, cy: QUAL_ROW_MID, r: BUBBLE_RX },
+    'qualified-right-1': { cx: COL_RIGHT, cy: QUAL_ROW_TOP, r: BUBBLE_RX },
+    'qualified-right-2': { cx: COL_RIGHT, cy: QUAL_ROW_BOT, r: BUBBLE_RX },
+    'qualified-right-3': { cx: COL_RIGHT, cy: QUAL_ROW_MID, r: BUBBLE_RX },
+  };
 }
 
-function makeNonRetirementSlots(): Record<string, CircleAnchor> {
-  // 2 rows × 4 cols = 8 slots (was 12). Slot IDs nr-l-1..4 + nr-r-1..4.
-  // Saved layouts referencing nr-l-5/6 or nr-r-5/6 fall back to default
-  // placement at render time.
-  const slots: Record<string, CircleAnchor> = {};
-  let il = 1;
-  let ir = 1;
-  for (const cy of NR_ROW_CY) {
-    slots[`nr-l-${il++}`] = { cx: COL_LEFT_OUTER, cy, r: BUBBLE_RX };
-    slots[`nr-l-${il++}`] = { cx: COL_LEFT_INNER, cy, r: BUBBLE_RX };
-    slots[`nr-r-${ir++}`] = { cx: COL_RIGHT_INNER, cy, r: BUBBLE_RX };
-    slots[`nr-r-${ir++}`] = { cx: COL_RIGHT_OUTER, cy, r: BUBBLE_RX };
-  }
-  return slots;
+function makeNonQualifiedSlots(): Record<string, CircleAnchor> {
+  return {
+    'non-qualified-left-1': { cx: COL_LEFT, cy: NQ_ROW_TOP, r: BUBBLE_RX },
+    'non-qualified-left-2': { cx: COL_LEFT, cy: NQ_ROW_MID, r: BUBBLE_RX },
+    'non-qualified-left-3': { cx: COL_LEFT, cy: NQ_ROW_BOT, r: BUBBLE_RX },
+    'non-qualified-right-1': { cx: COL_RIGHT, cy: NQ_ROW_TOP, r: BUBBLE_RX },
+    'non-qualified-right-2': { cx: COL_RIGHT, cy: NQ_ROW_MID, r: BUBBLE_RX },
+    'non-qualified-right-3': { cx: COL_RIGHT, cy: NQ_ROW_BOT, r: BUBBLE_RX },
+  };
 }
 
 export const DEFAULT_TCC_LAYOUT: TccBubbleLayout = {
   clientOval: { cx: PAGE_CENTER_X, cy: CLIENT_OVAL_CY, rx: CLIENT_OVAL_RX, ry: CLIENT_OVAL_RY },
-  trustCircle: { cx: PAGE_CENTER_X, cy: NR_TCY, r: TRUST_RADIUS },
-  retirementSlots: makeRetirementSlots(),
-  nonRetirementSlots: makeNonRetirementSlots(),
+  trustCircle: { cx: PAGE_CENTER_X, cy: TRUST_OVAL_CY, rx: TRUST_OVAL_RX, ry: TRUST_OVAL_RY },
+  retirementSlots: makeQualifiedSlots(),
+  nonRetirementSlots: makeNonQualifiedSlots(),
 };
 
 // =============================================================================
-// Palette — match Andrew's existing TCC template
+// Palette
 // =============================================================================
 const C_NAVY = '#1B3A6B';
 const C_NAVY_DEEP = '#142850';
-const C_BLUE_LIGHT = '#A8C5E2';
+const C_BADGE_BLUE = '#3A6FA5';
+const C_BLUE_LIGHT = '#9BCBEB';
 const C_INK = '#0A1F3A';
 const C_INK_MUTED = '#4A5568';
 const C_INK_SOFT = '#8B9099';
 const C_RULE = '#E2DDD3';
 const C_BG_SUNKEN = '#F2EFE8';
-const C_DANGER = '#A33A3A';
-const C_DASH_ACCENT = '#B8956A';
-const C_DEBUG_SAFE = '#A33A3A';
-const C_DEBUG_FILL = '#FF94A8';
-const C_DEBUG_BASELINE = '#D4A030';
+const C_DANGER = '#D62728';
 
 // =============================================================================
 // Number / date helpers
@@ -294,13 +285,13 @@ function moneyTspan(cents: number, isStale: boolean): string {
 }
 
 // =============================================================================
-// Section + name helpers
+// Section helpers
 // =============================================================================
 export function slotIdToSection(slotId: string): string {
-  if (slotId.startsWith('p1-')) return 'retirement-left';
-  if (slotId.startsWith('p2-')) return 'retirement-right';
-  if (slotId.startsWith('nr-l-')) return 'nonret-left';
-  if (slotId.startsWith('nr-r-')) return 'nonret-right';
+  if (slotId.startsWith('qualified-left-')) return 'qualified-left';
+  if (slotId.startsWith('qualified-right-')) return 'qualified-right';
+  if (slotId.startsWith('non-qualified-left-')) return 'non-qualified-left';
+  if (slotId.startsWith('non-qualified-right-')) return 'non-qualified-right';
   return '';
 }
 
@@ -325,191 +316,200 @@ export function splitAccountName(name: string): string[] {
 }
 
 // =============================================================================
-// Bubble (Phase 18 — ELLIPSE)
+// Account bubble (ellipse with internal text)
 // =============================================================================
-function bubbleContent(b: TccBubble, anchor: CircleAnchor, debug: boolean): string {
+function bubbleContent(b: TccBubble, anchor: CircleAnchor): string {
   const { cx, cy } = anchor;
   const acctNumLine = b.accountNumberLastFour
     ? `Acct # &#8226;&#8226;${escapeXml(b.accountNumberLastFour)}`
     : 'Acct #';
   const typeLines = splitAccountName(b.accountType);
-  const wrapShift = (typeLines.length - 1) * 12;
-
-  const dir = cx < PAGE_CENTER_X ? 1 : -1;
-  const cashSub =
-    b.cashCents != null
-      ? cashSubBubble(cx + dir * 50, cy + 38, b.cashCents, b.isStale)
-      : '';
+  const wrapShift = (typeLines.length - 1) * 11;
 
   const section = slotIdToSection(b.slotId);
   const lines: string[] = [];
 
   lines.push(
-    `<text x="${cx}" y="${cy + Y_ACCT_NUM}" text-anchor="middle" dominant-baseline="middle" font-family="var(--font-body), Geist, sans-serif" font-size="${FONT_ACCT}" fill="${C_INK_MUTED}" letter-spacing="0.4">${acctNumLine}</text>`,
+    `<text x="${cx}" y="${cy + Y_ACCT_NUM}" text-anchor="middle" dominant-baseline="middle" font-size="${FONT_ACCT}" fill="${C_INK_MUTED}" letter-spacing="0.4">${acctNumLine}</text>`,
   );
   lines.push(
-    `<line x1="${cx - 38}" y1="${cy + Y_ACCT_NUM + 6}" x2="${cx + 38}" y2="${cy + Y_ACCT_NUM + 6}" stroke="${C_INK}" stroke-width="0.5"/>`,
+    `<line x1="${cx - 36}" y1="${cy + Y_ACCT_NUM + 6}" x2="${cx + 36}" y2="${cy + Y_ACCT_NUM + 6}" stroke="${C_INK}" stroke-width="0.5"/>`,
   );
-
   typeLines.forEach((line, i) => {
     lines.push(
-      `<text x="${cx}" y="${cy + Y_ACCT_TYPE + i * 12}" text-anchor="middle" dominant-baseline="middle" font-family="var(--font-body), Geist, sans-serif" font-size="${FONT_TYPE}" font-weight="500" fill="${C_INK}">${escapeXml(line)}</text>`,
+      `<text x="${cx}" y="${cy + Y_ACCT_TYPE + i * 11}" text-anchor="middle" dominant-baseline="middle" font-size="${FONT_TYPE}" font-weight="500" fill="${C_INK}">${escapeXml(line)}</text>`,
     );
   });
-
   lines.push(
-    `<text x="${cx}" y="${cy + Y_BALANCE + wrapShift}" text-anchor="middle" dominant-baseline="middle" class="title num" font-family="var(--font-display), 'Source Serif 4', serif" font-size="${FONT_BALANCE}" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(b.balanceCents, b.isStale)}</text>`,
+    `<text x="${cx}" y="${cy + Y_BALANCE + wrapShift}" text-anchor="middle" dominant-baseline="middle" class="title num" font-size="${FONT_BALANCE}" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(b.balanceCents, b.isStale)}</text>`,
   );
-
   lines.push(
-    `<text x="${cx}" y="${cy + Y_DATE + wrapShift}" text-anchor="middle" dominant-baseline="middle" font-family="var(--font-body), Geist, sans-serif" font-size="${FONT_DATE}" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtShortDate(b.asOfDate))}</text>`,
+    `<text x="${cx}" y="${cy + Y_DATE + wrapShift}" text-anchor="middle" dominant-baseline="middle" font-size="${FONT_DATE}" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtShortDate(b.asOfDate))}</text>`,
   );
-
-  const debugOverlay = debug ? bubbleDebugOverlay(cx, cy) : '';
 
   return `<g class="bubble" data-account-id="${escapeXml(b.accountId)}" data-slot-id="${escapeXml(b.slotId)}" data-section="${section}" data-cx="${cx}" data-cy="${cy}" data-rx="${BUBBLE_RX}" data-ry="${BUBBLE_RY}" data-account-type="${escapeXml(b.accountType)}" data-institution="${escapeXml(b.institution ?? '')}" data-acct-last4="${escapeXml(b.accountNumberLastFour ?? '')}" data-asof="${escapeXml(fmtShortDate(b.asOfDate))}">
-  <ellipse class="bubble-ring" cx="${cx}" cy="${cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="#FFFFFF" stroke="${C_INK}" stroke-width="1.5"/>
+  <ellipse class="bubble-ring" cx="${cx}" cy="${cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="#FFFFFF" stroke="${C_INK}" stroke-width="1.4"/>
   ${lines.join('\n  ')}
-  ${cashSub}
-  ${debugOverlay}
-</g>`;
-}
-
-function bubbleDebugOverlay(cx: number, cy: number): string {
-  const baselineMarks = [Y_ACCT_NUM, Y_ACCT_TYPE, Y_ACCT_TYPE + 12, Y_BALANCE, Y_DATE]
-    .map(
-      (dy) =>
-        `<line x1="${cx - (BUBBLE_RX - 8)}" y1="${cy + dy}" x2="${cx + (BUBBLE_RX - 8)}" y2="${cy + dy}" stroke="${C_DEBUG_BASELINE}" stroke-width="0.4" opacity="0.6"/>`,
-    )
-    .join('\n  ');
-  return `<g class="bubble-debug" pointer-events="none">
-  <ellipse cx="${cx}" cy="${cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="${C_DEBUG_FILL}" opacity="0.05"/>
-  <ellipse cx="${cx}" cy="${cy}" rx="${BUBBLE_RX - 12}" ry="${BUBBLE_RY - 12}" fill="none" stroke="${C_DEBUG_SAFE}" stroke-width="0.6" stroke-dasharray="2 2" opacity="0.7"/>
-  ${baselineMarks}
-  <text x="${cx}" y="${cy - BUBBLE_RY - 4}" text-anchor="middle" font-family="var(--font-body), Geist, sans-serif" font-size="8" fill="${C_DEBUG_SAFE}">${BUBBLE_RX * 2}×${BUBBLE_RY * 2} / safe ${(BUBBLE_RX - 12) * 2}×${(BUBBLE_RY - 12) * 2}</text>
-</g>`;
-}
-
-function cashSubBubble(cx: number, cy: number, cents: number, isStale: boolean): string {
-  const r = 14;
-  return `<g class="cash-sub">
-  <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_BG_SUNKEN}" stroke="${C_NAVY}" stroke-width="0.5"/>
-  <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="6" fill="${C_INK_MUTED}" letter-spacing="0.4">CASH</text>
-  <text x="${cx}" y="${cy + 6}" text-anchor="middle" class="num" font-size="8" font-weight="500" fill="${C_INK}">${moneyTspan(cents, isStale)}</text>
 </g>`;
 }
 
 // =============================================================================
-// Center elements
+// Central client oval (Qualified) and central trust oval (Non-Qualified)
 // =============================================================================
 function clientOval(o: OvalAnchor, persons: TccPerson[]): string {
-  // Phase 21 — oval is now circular (rx=ry=50). With smaller dimensions,
-  // collapse text to fit: the 2-person variant uses tighter line spacing
-  // and drops the DOB line (kept SSN for identification, age fits in line).
   const head = `<ellipse cx="${o.cx}" cy="${o.cy}" rx="${o.rx}" ry="${o.ry}" fill="${C_BLUE_LIGHT}" stroke="${C_NAVY}" stroke-width="1"/>`;
   if (persons.length === 0) {
     return `${head}
-    <text x="${o.cx}" y="${o.cy + 4}" text-anchor="middle" font-size="10" fill="#FFFFFF" font-style="italic">No clients</text>`;
+    <text x="${o.cx}" y="${o.cy + 4}" text-anchor="middle" font-size="11" fill="#FFFFFF" font-style="italic">No clients</text>`;
   }
   if (persons.length === 1) {
     const p = persons[0]!;
     const age = ageFromDob(p.dateOfBirth);
     return `${head}
-    <text x="${o.cx}" y="${o.cy - 14}" text-anchor="middle" class="title" font-size="11" font-weight="500" fill="#FFFFFF">${escapeXml(p.firstName)} ${escapeXml(p.lastName)}</text>
-    <text x="${o.cx}" y="${o.cy - 1}" text-anchor="middle" font-size="8" fill="#FFFFFF">AGE ${age}</text>
-    <text x="${o.cx}" y="${o.cy + 11}" text-anchor="middle" font-size="8" fill="#FFFFFF" class="num">DOB ${escapeXml(fmtSlashDate(p.dateOfBirth))}</text>
-    <text x="${o.cx}" y="${o.cy + 23}" text-anchor="middle" font-size="8" fill="#FFFFFF" class="num">SSN &#8226;&#8226;${escapeXml(p.ssnLastFour)}</text>`;
+    <text x="${o.cx}" y="${o.cy - 18}" text-anchor="middle" class="title" font-size="13" font-weight="500" fill="#FFFFFF">${escapeXml(p.firstName)} ${escapeXml(p.lastName)}</text>
+    <text x="${o.cx}" y="${o.cy - 2}" text-anchor="middle" font-size="9" fill="#FFFFFF">AGE ${age}</text>
+    <text x="${o.cx}" y="${o.cy + 12}" text-anchor="middle" font-size="9" fill="#FFFFFF" class="num">DOB ${escapeXml(fmtSlashDate(p.dateOfBirth))}</text>
+    <text x="${o.cx}" y="${o.cy + 26}" text-anchor="middle" font-size="9" fill="#FFFFFF" class="num">SSN &#8226;&#8226;${escapeXml(p.ssnLastFour)}</text>`;
   }
   const [a, b] = persons;
   if (!a || !b) return head;
   return `${head}
-  <text x="${o.cx}" y="${o.cy - 18}" text-anchor="middle" class="title" font-size="9" font-weight="500" fill="#FFFFFF">${escapeXml(a.firstName)} ${escapeXml(a.lastName)}</text>
-  <text x="${o.cx}" y="${o.cy - 7}" text-anchor="middle" font-size="7" fill="#FFFFFF" class="num">AGE ${ageFromDob(a.dateOfBirth)} &#183; SSN &#8226;&#8226;${escapeXml(a.ssnLastFour)}</text>
-  <text x="${o.cx}" y="${o.cy + 7}" text-anchor="middle" class="title" font-size="9" font-weight="500" fill="#FFFFFF">${escapeXml(b.firstName)} ${escapeXml(b.lastName)}</text>
-  <text x="${o.cx}" y="${o.cy + 18}" text-anchor="middle" font-size="7" fill="#FFFFFF" class="num">AGE ${ageFromDob(b.dateOfBirth)} &#183; SSN &#8226;&#8226;${escapeXml(b.ssnLastFour)}</text>`;
+  <text x="${o.cx}" y="${o.cy - 24}" text-anchor="middle" class="title" font-size="11" font-weight="500" fill="#FFFFFF">${escapeXml(a.firstName)} ${escapeXml(a.lastName)}</text>
+  <text x="${o.cx}" y="${o.cy - 12}" text-anchor="middle" font-size="8" fill="#FFFFFF" class="num">AGE ${ageFromDob(a.dateOfBirth)} &#183; SSN &#8226;&#8226;${escapeXml(a.ssnLastFour)}</text>
+  <text x="${o.cx}" y="${o.cy + 4}" text-anchor="middle" class="title" font-size="11" font-weight="500" fill="#FFFFFF">${escapeXml(b.firstName)} ${escapeXml(b.lastName)}</text>
+  <text x="${o.cx}" y="${o.cy + 16}" text-anchor="middle" font-size="8" fill="#FFFFFF" class="num">AGE ${ageFromDob(b.dateOfBirth)} &#183; SSN &#8226;&#8226;${escapeXml(b.ssnLastFour)}</text>`;
 }
 
-function trustCircle(c: CircleAnchor, valueCents: number, asOf: string, isStale: boolean, persons: TccPerson[]): string {
-  // Phase 21 — trust shrunk r=70 → 50. Compress internal text to match.
-  const labelTop = persons.length === 2
+function trustOval(o: OvalAnchor, valueCents: number, asOf: string, isStale: boolean, persons: TccPerson[]): string {
+  const labelTop = persons.length >= 2
     ? `${persons[0]?.firstName ?? 'Client 1'} & ${persons[1]?.firstName ?? 'Client 2'}`
     : persons[0]?.firstName ?? 'Client 1';
+  // White fill (distinguishes Non-Qualified from Qualified's light-blue
+  // client oval). For households without a trust, the central bubble
+  // still renders but with the household identifier and no $ value.
+  const hasTrustValue = valueCents > 0;
   return `
-  <circle cx="${c.cx}" cy="${c.cy}" r="${c.r}" fill="#FFFFFF" stroke="${C_NAVY}" stroke-width="1.4"/>
-  <text x="${c.cx}" y="${c.cy - 18}" text-anchor="middle" font-size="9" font-weight="500" fill="${C_INK}">${escapeXml(labelTop)}</text>
-  <text x="${c.cx}" y="${c.cy - 6}" text-anchor="middle" font-size="9" font-weight="500" fill="${C_INK}">Family Trust</text>
-  <text x="${c.cx}" y="${c.cy + 10}" text-anchor="middle" class="title num" font-size="14" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(valueCents, isStale)}</text>
-  <text x="${c.cx}" y="${c.cy + 25}" text-anchor="middle" font-size="7" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtShortDate(asOf))}</text>`;
+  <ellipse cx="${o.cx}" cy="${o.cy}" rx="${o.rx}" ry="${o.ry}" fill="#FFFFFF" stroke="${C_NAVY}" stroke-width="1.4"/>
+  <text x="${o.cx}" y="${o.cy - 22}" text-anchor="middle" font-size="11" font-weight="500" fill="${C_INK}">${escapeXml(labelTop)}</text>
+  <text x="${o.cx}" y="${o.cy - 8}" text-anchor="middle" font-size="11" font-weight="500" fill="${C_INK}">Family Trust</text>
+  ${
+    hasTrustValue
+      ? `<text x="${o.cx}" y="${o.cy + 12}" text-anchor="middle" class="title num" font-size="15" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(valueCents, isStale)}</text>
+  <text x="${o.cx}" y="${o.cy + 28}" text-anchor="middle" font-size="8" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtShortDate(asOf))}</text>`
+      : `<text x="${o.cx}" y="${o.cy + 14}" text-anchor="middle" font-size="8" font-style="italic" fill="${C_INK_SOFT}">no trust on file</text>`
+  }`;
 }
 
 // =============================================================================
-// Banners (navy)
+// Header (NAME / DATE eyebrow pair)
 // =============================================================================
-function navyBanner(x: number, y: number, w: number, h: number, leftLabel: string, rightAmountCents: number): string {
+function headerEyebrows(s: TccSnapshot): string {
   return `
-  <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${C_NAVY}"/>
-  <text x="${x + 16}" y="${y + h * 0.7}" font-size="11" font-weight="500" letter-spacing="2" fill="#FFFFFF">${escapeXml(leftLabel)}</text>
-  <text x="${x + w - 16}" y="${y + h * 0.7}" text-anchor="end" class="num" font-size="13" font-weight="500" fill="#FFFFFF">${escapeXml(fmt(rightAmountCents))}</text>`;
+  <text x="20" y="24" font-size="10" font-weight="600" letter-spacing="0.12em" fill="${C_INK_MUTED}">NAME</text>
+  <text x="68" y="24" font-size="12" fill="${C_INK}">${escapeXml(s.householdName)}</text>
+  <text x="20" y="46" font-size="10" font-weight="600" letter-spacing="0.12em" fill="${C_INK_MUTED}">DATE</text>
+  <text x="68" y="46" class="num" font-size="12" fill="${C_INK}">${escapeXml(fmtLongDate(s.meetingDate))}</text>`;
 }
 
 // =============================================================================
-// Liabilities pill (header) and box (between trust and NR row 2)
+// Grand Total navy box + small Liabilities line below it
 // =============================================================================
-function liabilitiesPill(totalCents: number, asOf: string, x: number, y: number): string {
-  if (totalCents <= 0) return '';
-  const w = 260;
+function grandTotalBox(s: TccSnapshot): string {
+  const w = 280;
+  const h = 70;
+  const x = (CANVAS_W - w) / 2;
+  const y = 12;
+  return `
+  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${C_INK}"/>
+  <text x="${PAGE_CENTER_X}" y="${y + 26}" text-anchor="middle" font-size="11" font-weight="500" letter-spacing="0.08em" fill="#FFFFFF">GRAND TOTAL</text>
+  <text x="${PAGE_CENTER_X}" y="${y + 56}" text-anchor="middle" class="title num" font-size="22" font-weight="700" fill="#FFFFFF">${escapeXml(fmt(s.totals.grandTotalCents))}</text>
+  <text x="${PAGE_CENTER_X}" y="${y + h + 14}" text-anchor="middle" font-size="11" fill="${C_INK_SOFT}">Liabilities: <tspan class="num" fill="${C_INK_MUTED}" font-weight="500">${escapeXml(fmt(s.totals.liabilitiesTotalCents))}</tspan></text>
+  <text x="${PAGE_CENTER_X}" y="${y + h + 28}" text-anchor="middle" font-size="10" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtLongDate(s.asOfDate))}</text>`;
+}
+
+// =============================================================================
+// Section corner badges (paired QUALIFIED / NON-QUALIFIED)
+// =============================================================================
+function cornerBadgePair(label: string, y: number): string {
+  const w = label.length > 9 ? 132 : 100;
+  const h = 26;
+  const leftX = 40;
+  const rightX = CANVAS_W - 40 - w;
+  return `
+  <rect x="${leftX}" y="${y}" width="${w}" height="${h}" rx="4" fill="#FFFFFF" stroke="${C_BADGE_BLUE}" stroke-width="1"/>
+  <text x="${leftX + w / 2}" y="${y + 17}" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="0.08em" fill="${C_BADGE_BLUE}">${escapeXml(label)}</text>
+  <rect x="${rightX}" y="${y}" width="${w}" height="${h}" rx="4" fill="#FFFFFF" stroke="${C_BADGE_BLUE}" stroke-width="1"/>
+  <text x="${rightX + w / 2}" y="${y + 17}" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="0.08em" fill="${C_BADGE_BLUE}">${escapeXml(label)}</text>`;
+}
+
+// =============================================================================
+// Centered divider badge with optional subtotal — "Retirement Only" and
+// "NON RETIREMENT TOTAL" both use this. NOT a full-width banner.
+// =============================================================================
+function centeredNavyBadge(label: string, subtotalCents: number | null, y: number): string {
+  const hasSubtotal = subtotalCents != null;
+  const w = hasSubtotal ? 220 : 160;
   const h = 36;
-  const cy = y + h / 2;
+  const x = (CANVAS_W - w) / 2;
+  // Optional hairline rules to the left + right of the badge, with the
+  // badge "bridging" the gap.
+  const ruleY = y + h / 2;
+  const ruleGap = 24;
   return `
-  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="999" fill="${C_BG_SUNKEN}" stroke="${C_RULE}" stroke-width="1"/>
-  <text x="${x + 14}" y="${cy}" dominant-baseline="middle" font-family="var(--font-body)" font-size="11" font-weight="500" letter-spacing="0.08em" fill="${C_INK_SOFT}">LIABILITIES</text>
-  <text x="${x + w - 14}" y="${cy}" dominant-baseline="middle" text-anchor="end" class="num" font-size="13" font-weight="500" fill="${C_INK}">${escapeXml(fmt(totalCents))} &#183; ${escapeXml(fmtShortDate(asOf))}</text>`;
+  <line x1="60" y1="${ruleY}" x2="${x - ruleGap}" y2="${ruleY}" stroke="${C_RULE}" stroke-width="1"/>
+  <line x1="${x + w + ruleGap}" y1="${ruleY}" x2="${CANVAS_W - 60}" y2="${ruleY}" stroke="${C_RULE}" stroke-width="1"/>
+  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${C_INK}"/>
+  ${
+    hasSubtotal
+      ? `<text x="${PAGE_CENTER_X}" y="${y + 16}" text-anchor="middle" font-size="10" font-weight="600" letter-spacing="0.08em" fill="#FFFFFF">${escapeXml(label)}</text>
+  <text x="${PAGE_CENTER_X}" y="${y + 30}" text-anchor="middle" class="num" font-size="13" font-weight="700" fill="#FFFFFF">${escapeXml(fmt(subtotalCents))}</text>`
+      : `<text x="${PAGE_CENTER_X}" y="${y + h / 2 + 4}" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="0.08em" fill="#FFFFFF">${escapeXml(label)}</text>`
+  }`;
 }
 
-function liabilitiesBox(liabs: TccLiability[], x: number, y: number, w: number, h: number, maxRows = 2): string {
-  // Phase 21 — fixed height (was content-dependent). Box sits in the
-  // 40 px corridor between trust bottom (y=770) and NR row 2 top (y=820).
-  // Up to 2 liabilities fit. More are summarised as "+ N more".
-  const PAD_X = 14;
-  const PAD_Y = 6;
-  const HEADER_H = 12;
-  const ROW_H = 11;
-  const rows = liabs.slice(0, maxRows);
-  const moreCount = liabs.length - rows.length;
+// =============================================================================
+// Liabilities table (grey, plain rows, no bullets)
+// =============================================================================
+function liabilitiesTable(liabs: TccLiability[], x: number, y: number, w: number): string {
+  const PAD_X = 16;
+  const PAD_Y = 10;
+  const HEADER_H = 16;
+  const ROW_H = 16;
+  const rows = liabs.slice(0, 4);
+  const h = HEADER_H + Math.max(rows.length, 1) * ROW_H + PAD_Y * 2;
 
   const lines = rows
     .map((l, i) => {
-      const y0 = y + PAD_Y + HEADER_H + (i + 1) * ROW_H - 2;
+      const yRow = y + PAD_Y + HEADER_H + i * ROW_H + 11;
       const ratePart = l.interestRateBps != null ? ` @ ${(l.interestRateBps / 100).toFixed(2)}%` : '';
       const payoffPart = l.payoffDate ? `, pay off ${fmtShortDate(l.payoffDate)}` : '';
-      return `<text x="${x + PAD_X}" y="${y0}" font-size="8" fill="${C_INK_MUTED}" class="num">
-        <tspan font-weight="500" fill="${C_INK}">${escapeXml(l.creditorName)}</tspan>${l.liabilityType ? ` <tspan>(${escapeXml(l.liabilityType)})</tspan>` : ''} <tspan>${escapeXml(fmt(l.balanceCents))}</tspan><tspan>${escapeXml(ratePart + payoffPart)}</tspan>${l.isStale ? STALE_TSPAN : ''}
+      return `<text x="${x + PAD_X}" y="${yRow}" font-size="10" fill="${C_INK_MUTED}" class="num">
+        <tspan font-weight="600" fill="${C_INK}">${escapeXml(l.creditorName)}</tspan>${l.liabilityType ? ` <tspan>(${escapeXml(l.liabilityType)})</tspan>` : ''} <tspan font-weight="500">${escapeXml(fmt(l.balanceCents))}</tspan><tspan>${escapeXml(ratePart + payoffPart)}</tspan>${l.isStale ? STALE_TSPAN : ''}
       </text>`;
     })
     .join('');
-  const moreLine = moreCount > 0
-    ? `<text x="${x + w - PAD_X}" y="${y + h - PAD_Y - 2}" text-anchor="end" font-size="8" font-style="italic" fill="${C_INK_SOFT}">+ ${moreCount} more</text>`
+
+  const empty = rows.length === 0
+    ? `<text x="${x + w / 2}" y="${y + PAD_Y + HEADER_H + 11}" text-anchor="middle" font-size="10" font-style="italic" fill="${C_INK_SOFT}">No liabilities</text>`
     : '';
+
   return `
-  <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${C_BG_SUNKEN}" stroke="${C_RULE}" stroke-width="0.8"/>
-  <text x="${x + PAD_X}" y="${y + PAD_Y + 8}" font-size="9" font-weight="500" letter-spacing="1.5" fill="${C_INK_MUTED}">LIABILITIES</text>
+  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="${C_BG_SUNKEN}" stroke="${C_RULE}" stroke-width="1"/>
+  <text x="${x + PAD_X}" y="${y + PAD_Y + 10}" font-size="10" font-weight="600" letter-spacing="0.08em" fill="${C_INK_MUTED}">LIABILITIES</text>
   ${lines}
-  ${moreLine}`;
+  ${empty}`;
 }
 
 // =============================================================================
-// Stale footnote + side labels + svg wrap
+// Permanent disclaimer (Phase 33: always rendered)
 // =============================================================================
-function staleFootnote(): string {
-  return `<text x="780" y="${FOOTNOTE_Y}" text-anchor="end" font-size="9" font-style="italic" fill="${C_DANGER}">
-  <tspan fill="${C_DANGER}">*</tspan> Indicates we do not have up to date information
-</text>`;
+function disclaimerFooter(): string {
+  return `<text x="${CANVAS_W - 16}" y="${CANVAS_H - 14}" text-anchor="end" font-size="10" font-style="italic" fill="${C_DANGER}">* Indicates we do not have up to date information</text>`;
 }
 
-function sideLabel(text: string, x: number, cy: number, rotate: number, color: string): string {
-  return `<text transform="rotate(${rotate} ${x} ${cy})" x="${x}" y="${cy}" text-anchor="middle" font-size="11" font-weight="500" letter-spacing="3" fill="${color}">${escapeXml(text)}</text>`;
-}
-
+// =============================================================================
+// SVG wrapper + slot indicators (for drag-and-drop overlay)
+// =============================================================================
 function svgWrap(content: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" width="${CANVAS_W}" height="${CANVAS_H}" fill="${C_INK}">
 <defs>
@@ -520,14 +520,11 @@ ${content}
 }
 
 function slotIndicators(layout: TccBubbleLayout): string {
-  const both = {
-    ...layout.retirementSlots,
-    ...layout.nonRetirementSlots,
-  };
+  const both = { ...layout.retirementSlots, ...layout.nonRetirementSlots };
   return Object.entries(both)
     .map(([slotId, a]) => {
       const section = slotIdToSection(slotId);
-      return `<ellipse class="slot" data-slot-id="${escapeXml(slotId)}" data-section="${section}" data-cx="${a.cx}" data-cy="${a.cy}" cx="${a.cx}" cy="${a.cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="none" stroke="${C_DASH_ACCENT}" stroke-width="1" stroke-dasharray="4 3" opacity="0"></ellipse>`;
+      return `<ellipse class="slot" data-slot-id="${escapeXml(slotId)}" data-section="${section}" data-cx="${a.cx}" data-cy="${a.cy}" cx="${a.cx}" cy="${a.cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="none" stroke="#B8956A" stroke-width="1" stroke-dasharray="4 3" opacity="0"></ellipse>`;
     })
     .join('');
 }
@@ -538,30 +535,15 @@ function slotIndicators(layout: TccBubbleLayout): string {
 export function renderTccSvg(
   s: TccSnapshot,
   layout: TccBubbleLayout = DEFAULT_TCC_LAYOUT,
-  options: RenderOptions = {},
+  _options: RenderOptions = {},
 ): { page1: string } {
-  const debug = options.debug === true;
-  const hasStale = s.staleFields.size > 0 || s.retirementBubbles.some((b) => b.isStale) || s.nonRetirementBubbles.some((b) => b.isStale) || s.trust.isStale || s.liabilities.some((l) => l.isStale);
-
-  const header = `
-  <text x="22" y="24" font-size="9" font-weight="500" letter-spacing="1.5" fill="${C_INK_MUTED}">NAME</text>
-  <text x="60" y="24" font-size="11" fill="${C_INK}">${escapeXml(s.householdName)}</text>
-  <text x="22" y="44" font-size="9" font-weight="500" letter-spacing="1.5" fill="${C_INK_MUTED}">DATE</text>
-  <text x="60" y="44" class="num" font-size="11" fill="${C_INK}">${escapeXml(fmtLongDate(s.meetingDate))}</text>
-
-  <rect x="320" y="6" width="152" height="48" fill="${C_NAVY}"/>
-  <text x="396" y="22" text-anchor="middle" font-size="9" font-weight="500" letter-spacing="3" fill="#FFFFFF">GRAND TOTAL</text>
-  <text x="396" y="46" text-anchor="middle" class="title num" font-size="20" font-weight="500" fill="#FFFFFF">${moneyTspan(s.totals.grandTotalCents, false)}</text>
-
-  ${liabilitiesPill(s.totals.liabilitiesTotalCents, s.asOfDate, 500, 12)}`;
-
-  // Phase 22 — self-healing slot remap. If a bubble's saved slotId
-  // doesn't exist in the current grid (e.g. left over from a pre-Phase-21
-  // schema with different slot IDs), find the next available default slot
-  // for that bubble's spouse. Prevents lopsided rendering after schema
-  // changes without requiring a DB migration.
-  const RET_P1_FILL = ['p1-1', 'p1-2', 'p1-3', 'p1-4', 'p1-5', 'p1-6'];
-  const RET_P2_FILL = ['p2-1', 'p2-2', 'p2-3', 'p2-4', 'p2-5', 'p2-6'];
+  // Self-healing slot remap. If a saved layout pins a bubble to a slot
+  // that's missing from the current grid (e.g. old `p1-*` / `nr-*` IDs
+  // from before Phase 33), find the next free default slot for the
+  // bubble's side. Side hint comes from the saved slotId prefix.
+  const QUAL_LEFT_FILL = ['qualified-left-1', 'qualified-left-2', 'qualified-left-3'];
+  const QUAL_RIGHT_FILL = ['qualified-right-1', 'qualified-right-2', 'qualified-right-3'];
+  const QUAL_DEFAULT_FILL = [...QUAL_LEFT_FILL, ...QUAL_RIGHT_FILL];
 
   const retPlaced = (() => {
     const used = new Set<string>();
@@ -575,11 +557,20 @@ export function renderTccSvg(
     });
     for (const item of items) {
       if (item.anchor !== null) continue;
-      // Determine spouse from the saved slotId prefix (falls back to p1)
-      const fillOrder = item.bubble.slotId.startsWith('p2-') ? RET_P2_FILL : RET_P1_FILL;
-      const free = fillOrder.find(
-        (slotId) => !used.has(slotId) && layout.retirementSlots[slotId],
-      );
+      // Side hint: old `p1-` → left, `p2-` → right, new `qualified-left-` → left, etc.
+      const side =
+        item.bubble.slotId.startsWith('p2-') || item.bubble.slotId.startsWith('qualified-right-')
+          ? 'right'
+          : item.bubble.slotId.startsWith('p1-') || item.bubble.slotId.startsWith('qualified-left-')
+            ? 'left'
+            : 'either';
+      const order =
+        side === 'left'
+          ? [...QUAL_LEFT_FILL, ...QUAL_RIGHT_FILL]
+          : side === 'right'
+            ? [...QUAL_RIGHT_FILL, ...QUAL_LEFT_FILL]
+            : QUAL_DEFAULT_FILL;
+      const free = order.find((slot) => !used.has(slot) && layout.retirementSlots[slot]);
       if (free) {
         item.anchor = layout.retirementSlots[free]!;
         used.add(free);
@@ -588,32 +579,16 @@ export function renderTccSvg(
     return items;
   })();
 
-  const retBubbles = retPlaced
-    .filter((item) => item.anchor !== null)
-    .map((item) => bubbleContent(item.bubble, item.anchor!, debug))
-    .join('');
-
-  const retSection = `
-  ${sideLabel('QUALIFIED', 14, CLIENT_OVAL_CY, -90, C_BLUE_LIGHT)}
-  ${sideLabel('QUALIFIED', 778, CLIENT_OVAL_CY, 90, C_BLUE_LIGHT)}
-  ${clientOval(layout.clientOval, s.persons)}
-  ${retBubbles}
-  ${navyBanner(20, RET_BANNER_Y, 752, RET_BANNER_H, 'RETIREMENT ONLY', s.totals.p1RetirementCents + s.totals.p2RetirementCents)}`;
-
-  const divider = `<line x1="20" y1="${DIVIDER_Y}" x2="772" y2="${DIVIDER_Y}" stroke="${C_RULE}" stroke-width="1"/>`;
-
-  // Phase 22 — self-healing NR slot remap. Mirrors `lib/layouts.ts`
-  // NR_FILL_ORDER so the renderer's fallback produces the same positions
-  // as defaultTccAssignments. Row-major outer-mirror first: row 1 corners
-  // (nr-l-1, nr-r-2) → row 1 inner (nr-l-2, nr-r-1) → row 2 corners → row 2
-  // inner. With 3 NR accounts (Lipski) row 1 fills outer-L, outer-R,
-  // inner-L; with 5 (Park-Rivera) row 1 fills entirely + row 2 outer-L.
-  const NR_DEFAULT_FILL = [
-    'nr-l-1', 'nr-r-2', 'nr-l-2', 'nr-r-1',
-    'nr-l-3', 'nr-r-4', 'nr-l-4', 'nr-r-3',
+  const NQ_DEFAULT_FILL = [
+    'non-qualified-left-1',
+    'non-qualified-right-1',
+    'non-qualified-left-2',
+    'non-qualified-right-2',
+    'non-qualified-left-3',
+    'non-qualified-right-3',
   ];
 
-  const nrPlaced = (() => {
+  const nqPlaced = (() => {
     const used = new Set<string>();
     const items = s.nonRetirementBubbles.map((b) => {
       const a = layout.nonRetirementSlots[b.slotId];
@@ -625,8 +600,8 @@ export function renderTccSvg(
     });
     for (const item of items) {
       if (item.anchor !== null) continue;
-      const free = NR_DEFAULT_FILL.find(
-        (slotId) => !used.has(slotId) && layout.nonRetirementSlots[slotId],
+      const free = NQ_DEFAULT_FILL.find(
+        (slot) => !used.has(slot) && layout.nonRetirementSlots[slot],
       );
       if (free) {
         item.anchor = layout.nonRetirementSlots[free]!;
@@ -636,37 +611,50 @@ export function renderTccSvg(
     return items;
   })();
 
-  const nrBubbles = nrPlaced
+  const retBubbles = retPlaced
     .filter((item) => item.anchor !== null)
-    .map((item) => bubbleContent(item.bubble, item.anchor!, debug))
+    .map((item) => bubbleContent(item.bubble, item.anchor!))
+    .join('');
+  const nqBubbles = nqPlaced
+    .filter((item) => item.anchor !== null)
+    .map((item) => bubbleContent(item.bubble, item.anchor!))
     .join('');
 
-  const trust = layout.trustCircle;
-  // Phase 21 — liab box positioned in the trust→row-2 corridor.
-  // Wider (260px) and centered horizontally for better readability.
-  const liabBoxW = 320;
-  const liabBoxX = (CANVAS_W - liabBoxW) / 2;
-  const nrSection = `
-  ${sideLabel('NON QUALIFIED', 14, NR_TCY, -90, C_BLUE_LIGHT)}
-  ${sideLabel('NON QUALIFIED', 778, NR_TCY, 90, C_BLUE_LIGHT)}
-  ${trustCircle(trust, s.trust.valueCents, s.trust.asOfDate, s.trust.isStale, s.persons)}
-  ${nrBubbles}
-  ${s.liabilities.length > 0 ? liabilitiesBox(s.liabilities, liabBoxX, LIAB_BOX_Y, liabBoxW, LIAB_BOX_H) : ''}
-  ${navyBanner(20, NR_BANNER_Y, 752, NR_BANNER_H, 'NON RETIREMENT TOTAL', s.totals.nonRetirementCents + s.totals.trustCents)}`;
+  const retirementSubtotal = s.totals.p1RetirementCents + s.totals.p2RetirementCents;
+  const nonRetirementSubtotal = s.totals.nonRetirementCents + s.totals.trustCents;
 
-  const slots = slotIndicators(layout);
-  const debugBg = debug
-    ? `<rect width="${CANVAS_W}" height="${CANVAS_H}" fill="#FFF4E5" opacity="0.4"/>`
-    : '';
   const content = `
   <rect width="${CANVAS_W}" height="${CANVAS_H}" fill="#FFFFFF"/>
-  ${debugBg}
-  ${header}
-  ${slots}
-  ${retSection}
-  ${divider}
-  ${nrSection}
-  ${hasStale ? staleFootnote() : ''}`;
+
+  <!-- Header -->
+  ${headerEyebrows(s)}
+  ${grandTotalBox(s)}
+
+  <!-- Qualified section. Corner badges go FIRST (background-most) so
+       the central client oval + account bubbles paint cleanly over the
+       horizontal hairline rules; the badges themselves are in clear
+       bands above the bubble rows so they aren't hidden by ellipses. -->
+  ${cornerBadgePair('QUALIFIED', QUAL_BADGE_Y)}
+  ${clientOval(layout.clientOval, s.persons)}
+  ${slotIndicators(layout)}
+  ${retBubbles}
+
+  <!-- Retirement Only divider -->
+  ${centeredNavyBadge('RETIREMENT ONLY', retirementSubtotal, RET_DIVIDER_Y)}
+
+  <!-- Non-Qualified section -->
+  ${cornerBadgePair('NON-QUALIFIED', NQ_BADGE_Y)}
+  ${trustOval(layout.trustCircle, s.trust.valueCents, s.trust.asOfDate, s.trust.isStale, s.persons)}
+  ${nqBubbles}
+
+  <!-- Liabilities table -->
+  ${liabilitiesTable(s.liabilities, LIAB_TABLE_X, LIAB_TABLE_Y, LIAB_TABLE_W)}
+
+  <!-- Non Retirement Total badge -->
+  ${centeredNavyBadge('NON RETIREMENT TOTAL', nonRetirementSubtotal, NQ_TOTAL_BADGE_Y)}
+
+  <!-- Permanent disclaimer (always shown) -->
+  ${disclaimerFooter()}`;
 
   return { page1: svgWrap(content) };
 }

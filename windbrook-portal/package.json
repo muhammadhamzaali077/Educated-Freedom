@@ -25,7 +25,8 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:synthetic": "tsx src/db/seed-synthetic.ts",
     "db:studio": "drizzle-kit studio",
-    "db:migrate:phase22": "tsx src/db/migrations/phase22-clear-tcc-layouts.ts"
+    "db:migrate:phase22": "tsx src/db/migrations/phase22-clear-tcc-layouts.ts",
+    "db:migrate:phase33": "tsx src/db/migrations/phase33-clear-tcc-layouts.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

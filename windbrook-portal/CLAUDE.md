@@ -742,99 +742,81 @@ no `dist/` build step.
 
 ---
 
-## 16. Export pipeline (Phase 30 — additive PPTX path)
+## 16. Export pipeline (Phase 32 — single-source rendering)
 
-The portal exposes three report-export buttons on the report-detail page:
+All three export formats (PDF, PPTX, Canva-imported PDF) derive from the **same upstream SVG**. Visual fixes go in `src/reports/{sacs,tcc}/render.ts` once and propagate to every format. There is no parallel renderer to maintain.
 
 | Button | Route | Pipeline | Status |
 |---|---|---|---|
-| Download PDF | `POST /clients/:id/reports/:rid/export/pdf` | SVG → Playwright (chromium) → PDF | **Live** (Phase 8 path, untouched) |
-| Export to PowerPoint | `POST /clients/:id/reports/:rid/export/pptx` | snapshot → `render-pptx.ts` → `.pptx` | **Live** (Phase 30) |
-| Export to Canva | `POST /clients/:id/reports/:rid/export/canva` | uploads PDF as Canva asset | Live (Phase 11) |
+| Download PDF | `POST /clients/:id/reports/:rid/export/pdf` | snapshot → SVG → Playwright `page.pdf()` | Live (Phase 8 path) |
+| Export to PowerPoint | `POST /clients/:id/reports/:rid/export/pptx` | snapshot → SVG → Playwright `page.screenshot()` PNG → pptxgenjs full-slide image | Live (Phase 32) |
+| Export to Canva | `POST /clients/:id/reports/:rid/export/canva` | uploads the PDF download as a Canva asset | Live (Phase 11) |
 
-Each button is a `<form method="post">` that wraps a `<button class="action-button">`. The three buttons are uniform bordered ghost buttons — same height, same padding, same hover treatment (Phase 25/26 alignment work).
+The three buttons are uniform bordered ghost buttons (`.action-button`) on the report-detail page. Phase 25/26 alignment work means they share baseline + height + hover treatment.
 
-**Why PPTX matters.** Andrew's team historically rebuilt these reports by hand in Canva. Export to PowerPoint hands them an editable artifact in their existing tooling. PPTX is the long-term "source of truth" export format; PDF is a derivative.
+### Why this architecture
+
+Phase 30 shipped a parallel pptxgenjs renderer that built each PPTX from native PowerPoint shapes (ellipses, block arrows, rectangles). The result was a PPTX that was technically editable but visually drifted from the SVG renderer because the two code paths reproduced the same layout independently — every visual fix had to land in two places. Phase 32 collapses that to one renderer.
+
+**Trade-off accepted.** The PPTX is intentionally not editable as PowerPoint shapes — each slide is a single full-bleed image. Andrew's team can still edit the surrounding deck (add a title slide, append slides), but the report contents are immutable images. In exchange, the SVG, the PDF, and the PPTX-embedded image are pixel-equivalent (modulo Playwright's anti-aliasing). Visual fidelity wins.
 
 ### Files
 
 ```
 src/reports/
-  pdf.ts                  Phase-8 Playwright SVG→PDF (still used by /export/pdf)
-  pptx-to-pdf.ts          Phase-30 LibreOffice headless PPTX→PDF wrapper
+  pdf.ts                  Phase-8 SVG → Playwright page.pdf() (lives /export/pdf)
+  svg-to-png.ts           Phase-32 SVG → PNG rasterizer (own chromium instance)
+  pptx-to-pdf.ts          Phase-30 LibreOffice headless wrapper. INERT — kept
+                          for potential future use (true PPTX → PDF), no live
+                          code path uses it. Pre-warm + /internal/test-pptx-pdf
+                          diagnostic still mount but only fire when
+                          DEBUG_PPTX_PDF=1 is set.
   sacs/
-    render.ts             SVG renderer for in-portal preview + the Phase-8 PDF
-    render-pptx.ts        pptxgenjs SACS renderer (2 slides)
+    render.ts             SVG renderer — canonical source of truth for all
+                          three export formats
+    render-pptx.ts        Thin wrapper: SVG → PNG → pptxgenjs full-slide image
   tcc/
-    render.ts             SVG renderer for in-portal preview + the Phase-8 PDF
-    render-pptx.ts        pptxgenjs TCC renderer (1 slide, simplified layout)
+    render.ts             Same — canonical SVG
+    render-pptx.ts        Same wrapper pattern, single-slide
 
 scripts/
-  generate-pptx-assets.ts Rasterizes the inline SVG illustrations to PNG
-  smoke-pptx.mts          End-to-end smoke test of /export/pptx
-
-public/assets/
-  piggy-bank.png          Generated; embedded in SACS PPTX slide 1
-  papers-icon.png         Generated; embedded in SACS PPTX slide 1
+  smoke-pptx.mts          POSTs /export/pptx, verifies PK zip signature
+  extract-pptx-images.mts Pulls embedded images out of a PPTX zip for
+                          eyeball verification of the rasterizer output
 ```
 
-### Asset regeneration
+### Slide aspect
 
-PowerPoint can't embed inline SVG, so the piggy-bank illustration and papers-stack icon become PNGs at module load time. After editing the inline SVG geometry in `src/reports/sacs/render.ts`, regenerate the PNGs:
+Each report's PPTX uses a custom slide layout (`pptx.defineLayout`) sized to match the SVG's natural aspect:
 
-```sh
-pnpm tsx scripts/generate-pptx-assets.ts
-```
+- **SACS** — slide 10 × 7.5 in (4:3, matching the 768 × 576 SACS canvas)
+- **TCC** — slide 7.92 × 10 in (≈4:5 portrait, matching the 792 × 1000 TCC canvas)
 
-Commit the resulting `public/assets/*.png` files. They're ~10–20 KB each.
+The full-bleed PNG is placed at `(0, 0)` filling the slide. No letterbox bars; no aspect distortion.
 
-### Migration plan: additive then flip
+### Rasterizer behavior
 
-Phase 30 ships PPTX export **alongside** the existing Playwright PDF path, not as a replacement. The migration to "PDF derives from PPTX" runs in two steps:
+`svgToPng` (in `src/reports/svg-to-png.ts`) keeps a single chromium instance warm for the lifetime of the process — independent of the chromium instance `pdf.ts` keeps for `/export/pdf`. Each call:
 
-1. **Now (Phase 30)** — `/export/pptx` is live. `/export/pdf` still uses `pdf.ts` (Playwright). LibreOffice is added to the Dockerfile but only exercised by:
-   - `prewarmLibreOffice()` at server boot — non-fatal if missing, logs a clear warning
-   - `/internal/test-pptx-pdf` — diagnostic-only, mounted only when `DEBUG_PPTX_PDF=1` in env
-2. **Once verified (follow-up phase)** — flip `/export/pdf` to the new pipeline (`renderSacs/TccPptx → pptxBufferToPdfBuffer`) and delete `pdf.ts`. Pixel fidelity is expected to drop ~10–15 % from the Playwright path; that's accepted because PPTX becomes the source of truth and PowerPoint is what Andrew's team edits.
+1. Opens a fresh browser context (so concurrent calls don't share state)
+2. `setContent` an HTML page wrapping the SVG
+3. Reads the SVG's `getBoundingClientRect()` to size the viewport
+4. `page.locator('svg').screenshot({ type: 'png' })` — naturally sized to the SVG, scaled by `deviceScaleFactor`
 
-### Verifying LibreOffice in production
+Default `scale: 2` (retina). Bump to `scale: 3` if text in the embedded image looks soft; PNG file size grows linearly. Current SACS PPTX is ~340 KB (vs ~120 KB in Phase 30 with native shapes).
 
-After a Railway deploy that includes the Dockerfile changes:
+### Visual fixes propagate everywhere
 
-1. Set `DEBUG_PPTX_PDF=1` in the service's env vars and redeploy.
-2. Hit `https://<host>/internal/test-pptx-pdf` while signed in.
-3. The browser should display a 2-slide PDF generated through the full PPTX → LibreOffice pipeline. If you see a 500, the response body has the LibreOffice stderr.
-4. Once the diagnostic returns a valid PDF, you've confirmed:
-   - `libreoffice` binary is on PATH
-   - JRE is installed (LibreOffice's PDF export filter needs Java)
-   - `prewarmLibreOffice()` is firing without `ENOENT`
-5. Unset `DEBUG_PPTX_PDF` and redeploy to remove the diagnostic surface before flipping `/export/pdf`.
+After Phase 32, fixing a SACS-renderer bug requires editing exactly **one file** (`src/reports/sacs/render.ts`). The PDF route, the PPTX route, and the Canva-uploaded PDF all pick up the change automatically because they all rasterize the same SVG.
 
-### Dockerfile additions
+### Inert infrastructure (LibreOffice)
 
-The runtime stage installs LibreOffice + JRE + fallback fonts via apt. Multi-stage Docker doesn't carry apt installs forward, so they must land in the final stage:
+`src/reports/pptx-to-pdf.ts` and the Dockerfile's `libreoffice-core libreoffice-impress default-jre-headless fonts-liberation fonts-lato` install remain in place but are no longer reachable from any user-facing route. They're kept because:
 
-```dockerfile
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice-core libreoffice-impress \
-    default-jre-headless \
-    fonts-liberation fonts-lato \
-    && rm -rf /var/lib/apt/lists/*
-```
+1. The diagnostic route `/internal/test-pptx-pdf` (only mounted when `DEBUG_PPTX_PDF=1`) still uses the LibreOffice path. Useful if a future phase needs true PPTX-to-PDF conversion.
+2. Removing the Dockerfile install would shrink the image by ~400 MB, but reinstalling LibreOffice on Railway requires a long rebuild, so we hold off until we're sure we don't want it.
 
-Image grows by ~400 MB (LibreOffice ~200 MB + JRE ~200 MB). Railway services that run hot in 512 MB RAM may need the bump to 1 GB — LibreOffice can spike to ~300 MB during a conversion.
-
-### Geist font in PDF output
-
-We ship Geist as woff2 only (`public/fonts/Geist-Variable.woff2`). LibreOffice uses fontconfig, which doesn't index woff2, so it substitutes Liberation Sans for sans-serif faces in the PDF output. Visual difference: minor (Liberation Sans is metrically close to Geist for body weights). To get exact Geist matching:
-
-1. Download Geist as TTF from Vercel's font repo and check it in at `public/fonts/Geist-Variable.ttf`.
-2. Uncomment the `COPY public/fonts/Geist-Variable.ttf … && fc-cache -f -v` block in the Dockerfile runtime stage.
-3. Redeploy.
-
-### Snapshot shape adaptation
-
-The pptxgenjs renderers accept the existing `SacsSnapshot` / `TccSnapshot` types unchanged — same flat shape `lib/reports.ts` `buildSacsRenderInput` / `buildTccRenderInput` produce. Field accesses inside `render-pptx.ts` mirror those in the SVG renderer. The Pinnacle PR value chip on SACS page 2 shows `privateReserveBalanceCents` (current balance) while the `… TARGET` line below shows `pinnacleTargetCents` — same fix that landed in Phase 28.
+If the inert infrastructure becomes a maintenance burden later, the deletion list is: `src/reports/pptx-to-pdf.ts`, the LibreOffice apt-get block in `Dockerfile`, the `prewarmLibreOffice()` call in `src/server.ts`, and the `/internal/test-pptx-pdf` route in `src/routes/pages/reports.tsx`.
 
 ### CJS / ESM interop
 

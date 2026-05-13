@@ -1,7 +1,7 @@
 /**
- * Log in as Maryann, navigate to a Cole Household SACS report, and capture
- * the live in-browser render. Verifies the Phase-24 Page-1 fixes serve
- * end-to-end (renderer → Hono → browser) and not just from the rasterizer.
+ * Log in as Maryann, navigate to the SACS reports for Lipski and Cole,
+ * and capture the live in-browser render. Used to verify SACS renderer
+ * fixes end-to-end (renderer → Hono → browser).
  */
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -24,32 +24,33 @@ await page.click('button[type="submit"]');
 await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
 await page.waitForLoadState('networkidle');
 
-await page.goto(`${BASE}/clients`, { waitUntil: 'networkidle' });
-const coleRow = page.locator('a.clients-row', { has: page.locator('h2', { hasText: 'Cole Household' }) });
-const colePath = await coleRow.first().getAttribute('href');
-if (!colePath) throw new Error('Cole Household row not found');
+async function shoot(householdName: string, slug: string) {
+  await page.goto(`${BASE}/clients`, { waitUntil: 'networkidle' });
+  const row = page.locator('a.clients-row', { has: page.locator('h2', { hasText: householdName }) });
+  const path = await row.first().getAttribute('href');
+  if (!path) throw new Error(`${householdName} row not found`);
 
-await page.goto(`${BASE}${colePath}`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
 
-const sacsLink = page.locator('a.history-row-link', {
-  has: page.locator('span.type-pill-sacs'),
-});
-const sacsPath = await sacsLink.first().getAttribute('href');
-if (!sacsPath) throw new Error('No SACS report in history');
+  const sLink = page.locator('a.history-row-link', { has: page.locator('span.type-pill-sacs') });
+  const sPath = await sLink.first().getAttribute('href');
+  if (!sPath) throw new Error(`No SACS report in history for ${householdName}`);
 
-await page.goto(`${BASE}${sacsPath}`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(800);
+  await page.goto(`${BASE}${sPath}`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(800);
 
-// Two pages render top-to-bottom — fullPage capture grabs both
-await page.screenshot({ path: `${OUT}/sacs-live-cole.png`, fullPage: true });
-console.log('  → sacs-live-cole.png (full)');
+  await page.screenshot({ path: `${OUT}/sacs-live-${slug}.png`, fullPage: true });
+  console.log(`  → sacs-live-${slug}.png (full)`);
 
-// Also clip just the first page's SVG for a tighter side-by-side
-const firstPage = page.locator('div.report-page').first();
-await firstPage.scrollIntoViewIfNeeded();
-await page.waitForTimeout(200);
-await firstPage.screenshot({ path: `${OUT}/sacs-live-cole-page1.png` });
-console.log('  → sacs-live-cole-page1.png');
+  const firstPage = page.locator('div.report-page').first();
+  await firstPage.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(200);
+  await firstPage.screenshot({ path: `${OUT}/sacs-live-${slug}-page1.png` });
+  console.log(`  → sacs-live-${slug}-page1.png`);
+}
+
+await shoot('Lipski Family', 'lipski');
+await shoot('Cole Household', 'cole');
 
 await browser.close();
 console.log('done');

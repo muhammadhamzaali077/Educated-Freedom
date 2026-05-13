@@ -450,10 +450,14 @@ app.post('/clients/:id/reports/:reportId/layout', async (c) => {
 });
 
 function sectionOf(slotId: string): string {
-  if (slotId.startsWith('p1-')) return 'p1';
-  if (slotId.startsWith('p2-')) return 'p2';
-  if (slotId.startsWith('nr-l-')) return 'nr-l';
-  if (slotId.startsWith('nr-r-')) return 'nr-r';
+  // Phase 33 slot prefixes. Each prefix maps to its data-section value
+  // (qualified-left / qualified-right / non-qualified-left / non-qualified-right)
+  // matching what the renderer puts on each bubble + slot indicator and
+  // what public/js/layout-editor.js validates against on drag.
+  if (slotId.startsWith('qualified-left-')) return 'qualified-left';
+  if (slotId.startsWith('qualified-right-')) return 'qualified-right';
+  if (slotId.startsWith('non-qualified-left-')) return 'non-qualified-left';
+  if (slotId.startsWith('non-qualified-right-')) return 'non-qualified-right';
   return '';
 }
 
@@ -623,11 +627,13 @@ app.post('/clients/:id/reports/:reportId/export/pptx', async (c) => {
   try {
     if (report.reportType === 'SACS') {
       const sacsInput = buildSacsRenderInput(client, snapshot, report.meetingDate);
-      const pptx = renderSacsPptx(sacsInput);
+      // Phase-32: renderSacsPptx is async (rasterizes SVG → PNG before
+      // embedding). Must await before writing the buffer.
+      const pptx = await renderSacsPptx(sacsInput);
       pptxBuffer = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
     } else {
       const tccInput = buildTccRenderInput(client, snapshot, layout, report.meetingDate);
-      const pptx = renderTccPptx(tccInput);
+      const pptx = await renderTccPptx(tccInput);
       pptxBuffer = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
     }
   } catch (err) {
@@ -685,7 +691,7 @@ if (process.env.DEBUG_PPTX_PDF === '1') {
       staleFields: new Set<string>(),
     };
     try {
-      const pptx = renderSacsPptx(fixture);
+      const pptx = await renderSacsPptx(fixture);
       const pptxBuf = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
       const pdfBuf = await pptxBufferToPdfBuffer(pptxBuf);
       c.header('Content-Type', 'application/pdf');

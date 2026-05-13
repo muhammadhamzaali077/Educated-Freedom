@@ -18,10 +18,12 @@ export interface LayoutPayload {
 }
 
 /**
- * Default TCC slot assignment. Walks accounts in displayOrder and fills
- * slots in order. p1 retirement → p1-1..6, p2 → p2-1..6, non-retirement
- * splits left/right by alternation so a single-row of NR accounts uses
- * both sides symmetrically.
+ * Default TCC slot assignment (Phase 33 — symmetric corner-pair grid).
+ * Walks accounts in displayOrder, drops Client 1 retirement into the
+ * left-column qualified slots, Client 2 retirement into the right
+ * column, and alternates non-retirement accounts left/right starting
+ * with row 1. The renderer's self-healing fallback covers any saved
+ * layouts still referencing the pre-Phase-33 IDs (p1-*, p2-*, nr-*).
  */
 export function defaultTccAssignments(accounts: AccountRow[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -34,8 +36,7 @@ export function defaultTccAssignments(accounts: AccountRow[]): Record<string, st
   const p2Ret = sorted.filter((a) => a.accountClass === 'retirement' && a.personIndex === 2);
   // PRD §User Story 1 — TCC's non-retirement section spans every non-qualified
   // holding: non_retirement, investment (Schwab brokerage), AND private_reserve
-  // (Pinnacle PR). Trust gets its own central circle, not a bubble. Inflow /
-  // outflow are SACS-only and excluded here.
+  // (Pinnacle PR). Trust gets its own central circle, not a bubble.
   const nonRet = sorted.filter(
     (a) =>
       a.accountClass === 'non_retirement' ||
@@ -43,58 +44,33 @@ export function defaultTccAssignments(accounts: AccountRow[]): Record<string, st
       a.accountClass === 'private_reserve',
   );
 
-  // Phase 18 — 24-slot grid restored. Slot IDs (p1/p2/nr-l/nr-r × 1..6)
-  // map to a 2-col × 3-row grid per side per section:
-  //   p1-1 = TOP_OUTER (cx=110, cy=170)
-  //   p1-2 = TOP_INNER (cx=250, cy=170)
-  //   p1-3 = MID_OUTER (cx=110, cy=290)
-  //   p1-4 = MID_INNER (cx=250, cy=290)
-  //   p1-5 = BOT_OUTER (cx=110, cy=410)
-  //   p1-6 = BOT_INNER (cx=250, cy=410)
-  // Phase 18 brief fill order: MID_INNER first (closest to the central
-  // client oval) so a single retirement account lands beside the oval
-  // rather than at a far corner. Pattern: MID_INNER → TOP_INNER →
-  // BOT_INNER → MID_OUTER → TOP_OUTER → BOT_OUTER per spouse.
-  const P1_FILL_ORDER = ['p1-4', 'p1-2', 'p1-6', 'p1-3', 'p1-1', 'p1-5'];
-  const P2_FILL_ORDER = ['p2-3', 'p2-1', 'p2-5', 'p2-4', 'p2-2', 'p2-6'];
-  // Phase 22 — fill order changed to row-major outer-mirror-first so the
-  // row-1 corners fill before the row-1 inner cols. For Lipski (3 NR) the
-  // expected layout is "row 1 fully populated edge-to-center, row 2 empty"
-  // — with this order, 3 accounts go outer-L → outer-R → inner-L. For
-  // Park-Rivera (5 NR), accounts 1-4 fill row 1 across all 4 cols,
-  // account 5 spills to row 2 outer-L.
-  // Slot positions (cx, cy):
-  //   nr-l-1 = (100, 595)   outer-L top
-  //   nr-l-2 = (270, 595)   inner-L top
-  //   nr-l-3 = (100, 875)   outer-L bot
-  //   nr-l-4 = (270, 875)   inner-L bot
-  //   nr-r-1 = (522, 595)   inner-R top
-  //   nr-r-2 = (692, 595)   outer-R top
-  //   nr-r-3 = (522, 875)   inner-R bot
-  //   nr-r-4 = (692, 875)   outer-R bot
-  // (See `makeNonRetirementSlots` in render.ts for source of truth.)
-  // Old slot IDs nr-{l,r}-5 / nr-{l,r}-6 are deprecated; the Phase 22
-  // self-heal in render.ts auto-remaps any persisted bubble that references
-  // them to the next free default slot.
-  const NR_FILL_ORDER = [
-    'nr-l-1', // row 1 outer-L
-    'nr-r-2', // row 1 outer-R
-    'nr-l-2', // row 1 inner-L
-    'nr-r-1', // row 1 inner-R
-    'nr-l-3', // row 2 outer-L
-    'nr-r-4', // row 2 outer-R
-    'nr-l-4', // row 2 inner-L
-    'nr-r-3', // row 2 inner-R
+  // Phase 33 slot grid — 3 slots per side per section, six total per
+  // section. Fill top → bottom on each side. Bubble at (140, 200) for
+  // qualified-left-1, (140, 370) for qualified-left-2, (140, 285) beside
+  // the central client oval for qualified-left-3 (used only when a
+  // household has 5+ retirement accounts on one side).
+  const QUAL_LEFT_FILL = ['qualified-left-1', 'qualified-left-2', 'qualified-left-3'];
+  const QUAL_RIGHT_FILL = ['qualified-right-1', 'qualified-right-2', 'qualified-right-3'];
+
+  // Non-Qualified — alternate left/right starting top so a 3-account
+  // household fills both top corners + one mid-left, looking balanced.
+  const NQ_FILL_ORDER = [
+    'non-qualified-left-1',
+    'non-qualified-right-1',
+    'non-qualified-left-2',
+    'non-qualified-right-2',
+    'non-qualified-left-3',
+    'non-qualified-right-3',
   ];
 
-  p1Ret.slice(0, P1_FILL_ORDER.length).forEach((a, i) => {
-    out[a.id] = P1_FILL_ORDER[i] as string;
+  p1Ret.slice(0, QUAL_LEFT_FILL.length).forEach((a, i) => {
+    out[a.id] = QUAL_LEFT_FILL[i] as string;
   });
-  p2Ret.slice(0, P2_FILL_ORDER.length).forEach((a, i) => {
-    out[a.id] = P2_FILL_ORDER[i] as string;
+  p2Ret.slice(0, QUAL_RIGHT_FILL.length).forEach((a, i) => {
+    out[a.id] = QUAL_RIGHT_FILL[i] as string;
   });
-  nonRet.slice(0, NR_FILL_ORDER.length).forEach((a, i) => {
-    out[a.id] = NR_FILL_ORDER[i] as string;
+  nonRet.slice(0, NQ_FILL_ORDER.length).forEach((a, i) => {
+    out[a.id] = NQ_FILL_ORDER[i] as string;
   });
 
   return out;

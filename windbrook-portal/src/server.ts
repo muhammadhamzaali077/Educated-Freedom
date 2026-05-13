@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { app } from './app.js';
 import { prewarmBrowser, shutdownBrowser } from './reports/pdf.js';
 import { prewarmLibreOffice } from './reports/pptx-to-pdf.js';
+import { shutdownSvgRasterizer } from './reports/svg-to-png.js';
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -85,7 +86,7 @@ serve(
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, async () => {
-    await shutdownBrowser();
+    await Promise.all([shutdownBrowser(), shutdownSvgRasterizer()]);
     process.exit(0);
   });
 }

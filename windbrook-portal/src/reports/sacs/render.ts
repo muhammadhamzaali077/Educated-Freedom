@@ -179,7 +179,7 @@ function renderPage1(s: SacsSnapshot, debug: boolean): string {
   const contributors = s.inflowSources.filter((p) => p.monthlyAmountCents > 0);
   const contributorLines = contributors
     .map((p, i) => {
-      const y = 110 + i * 19;
+      const y = 105 + i * 18;
       return `<text x="14" y="${y}" font-family="${F_BODY}" font-size="13" font-weight="700" fill="${C_INFLOW_GREEN}">${escapeXml(fmt(p.monthlyAmountCents))}- ${escapeXml(p.personFirstName)}</text>`;
     })
     .join('\n  ');
@@ -204,27 +204,23 @@ function renderPage1(s: SacsSnapshot, debug: boolean): string {
       font-family="${F_BODY}" font-size="16" font-weight="700"
       fill="${C_INK}">${escapeXml(fmtLongDate(s.meetingDate))}</text>
 
-<!-- Diamond $ icon (drawing 15: green filled rotated square) -->
-<polygon points="65.05,128.87 98.90,165.20 63.54,198.15 29.69,161.82"
-         fill="${C_INFLOW_GREEN}" stroke="none"/>
-<text x="60" y="178" text-anchor="middle"
+<!-- $ glyph at the top of the header stack — large bold serif, no
+     container. Reference renders the icon as a bare glyph, not a chip. -->
+<text x="60" y="80" text-anchor="middle"
       font-family="Georgia, 'Times New Roman', serif"
-      font-size="48" font-weight="700"
-      fill="${C_WHITE}">$</text>
+      font-size="56" font-weight="900"
+      fill="${C_INFLOW_GREEN}">$</text>
 
-<!-- Contributor lines (CanvaSans-Bold 13, green) -->
+<!-- Contributor lines (CanvaSans-Bold 13, green) — sit below the $ glyph -->
 ${contributorLines}
 
-<!-- Phase-29 / Fix 1: chunky diagonal green arrow bridging the
-     contributor area to the INFLOW circle's upper-left edge so the
-     diamond + contributors don't read as orphaned. Tail at (78, 130)
-     sits in the empty zone between the contributor line baseline and
-     the diamond's top edge; with rotate(35°) the tip lands at world
-     (105, 161) — about 5 px outside the inflow circle's 10 o'clock
-     position. The brief's original (40, 145) put the tip inside the
-     diamond, where green-on-green made the arrow invisible. -->
-<g class="contributor-arrow" transform="translate(78, 130) rotate(35)">
-  <path d="M 0 0 L 22 0 L 22 -8 L 40 10 L 22 28 L 22 20 L 0 20 Z"
+<!-- Chunky green down-arrow flowing into the inflow circle's upper-left.
+     Local coords: 16px-wide tail (y=0..18) + 40px-wide arrowhead pointing
+     down to y=38. translate(60, 140) lands the tail at world y=140 and
+     the tip at (60, 178), entering the inflow circle (top edge y≈151)
+     well above the "INFLOW" label baseline at y=200. -->
+<g transform="translate(60, 140)">
+  <path d="M -8 0 L 8 0 L 8 18 L 20 18 L 0 38 L -20 18 L -8 18 Z"
         fill="${C_INFLOW_GREEN}" stroke="none"/>
 </g>
 
@@ -302,13 +298,16 @@ ${contributorLines}
 
 <!-- Piggy bank with coins inside the lower part of the circle -->
 <g transform="translate(${P1.RESERVE_CX - 60}, 425)">
-  <ellipse cx="0" cy="48" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
-  <ellipse cx="0" cy="42" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
-  <ellipse cx="0" cy="36" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
-  <ellipse cx="0" cy="30" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
-  <ellipse cx="120" cy="48" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
-  <ellipse cx="120" cy="42" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
-  <ellipse cx="120" cy="36" rx="8" ry="2.5" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="0" cy="48" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="0" cy="42" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="0" cy="36" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="0" cy="30" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="0" cy="24" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="120" cy="48" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="120" cy="42" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="120" cy="36" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="120" cy="30" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
+  <ellipse cx="120" cy="24" rx="11" ry="4" fill="#E5B040" stroke="#A37A20" stroke-width="0.5"/>
   <ellipse cx="60" cy="35" rx="34" ry="22" fill="#F5A8B8" stroke="#C77A8C" stroke-width="1"/>
   <path d="M 47 16 L 53 12 L 55 23 Z" fill="#C77A8C"/>
   <ellipse cx="89" cy="36" rx="9" ry="7" fill="#E08FA0" stroke="#C77A8C" stroke-width="0.6"/>
@@ -325,7 +324,7 @@ ${contributorLines}
 </g>
 
 <!-- L-arrow Inflow bottom → Private Reserve left, hollow blue -->
-<path d="M 144.7 355 L 174.7 355 L 174.7 406.85 L 244 406.85 L 244 396 L 269.3 421.85 L 244 447.7 L 244 436.85 L 144.7 436.85 Z"
+<path d="M 144.7 355 L 174.7 355 L 174.7 406.85 L 244 406.85 L 244 396 L 265 421.85 L 244 447.7 L 244 436.85 L 144.7 436.85 Z"
       fill="${C_WHITE}" stroke="${C_RESERVE_BLUE}" stroke-width="2"/>
 <text x="195" y="426" text-anchor="middle"
       font-family="${F_BODY}" font-size="13" font-weight="700"
@@ -356,20 +355,26 @@ ${contributorLines}
 <line x1="727" y1="257.5" x2="649" y2="257.5" stroke="${C_INK}" stroke-width="3"/>
 <polygon points="648.74,261.65 642.78,257.10 648.82,252.65" fill="${C_INK}"/>
 
-<!-- Bottom dotted blue stem + MONTHLY EXPENSES label -->
+<!-- Bottom dotted blue stem — descends from Private Reserve, passes
+     through the gap between MONTHLY and EXPENSES at y=552, ends with
+     an arrowhead below the text baseline. -->
 <g class="monthly-expenses-stem">
-  ${[0, 1, 2, 3, 4, 5, 6]
-    .map((i) => `<rect x="370" y="${524 + i * 6}" width="4" height="3" fill="${C_RESERVE_BLUE}"/>`)
+  ${[0, 1, 2, 3, 4, 5, 6, 7, 8]
+    .map((i) => `<rect x="${CANVAS_W / 2 - 1.5}" y="${524 + i * 6}" width="3" height="3" fill="${C_RESERVE_BLUE}"/>`)
     .join('\n  ')}
-  <polygon points="367.76,560.71 376.76,560.71 372.41,566.82" fill="${C_RESERVE_BLUE}"/>
+  <polygon points="${CANVAS_W / 2 - 5},576 ${CANVAS_W / 2 + 5},576 ${CANVAS_W / 2},584" fill="${C_RESERVE_BLUE}"/>
 </g>
 
-<!-- "MONTHLY EXPENSES" label (Garet-Bold 18.04, BLACK, bottom-center).
-     Reference shows "MONTLHY EXPENSES" — typo correction is pre-approved
-     by Maryann at 52:42, so we render the correctly-spelled version. -->
-<text x="${CANVAS_W / 2}" y="552" text-anchor="middle"
+<!-- "MONTHLY EXPENSES" label split into two halves so the dashed stem
+     passes cleanly through the gap between the two words. Reference
+     shows "MONTLHY EXPENSES" — typo correction pre-approved by Maryann
+     at 52:42, so we render the correctly-spelled version. -->
+<text x="${CANVAS_W / 2 - 16}" y="552" text-anchor="end"
       font-family="${F_BODY}" font-size="18" font-weight="700"
-      fill="${C_INK}">MONTHLY EXPENSES</text>
+      fill="${C_INK}">MONTHLY</text>
+<text x="${CANVAS_W / 2 + 16}" y="552" text-anchor="start"
+      font-family="${F_BODY}" font-size="18" font-weight="700"
+      fill="${C_INK}">EXPENSES</text>
 
 ${debug ? `<rect x="0" y="0" width="${CANVAS_W}" height="${CANVAS_H}" fill="none" stroke="orange" stroke-width="1" stroke-dasharray="4 4"/>` : ''}
 `;
