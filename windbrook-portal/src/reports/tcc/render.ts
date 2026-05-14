@@ -118,16 +118,16 @@ export interface RenderOptions {
 // Canvas + section geometry
 // =============================================================================
 const CANVAS_W = 792;
-const CANVAS_H = 1000;
+const CANVAS_H = 1020;
 const PAGE_CENTER_X = CANVAS_W / 2;
 
-// Account bubbles: 130 × 90 (rx=65, ry=45). Smaller than central bubbles.
-const BUBBLE_RX = 65;
-const BUBBLE_RY = 45;
+// Account bubbles: 170 × 110 (rx=85, ry=55). Smaller than central bubbles.
+const BUBBLE_RX = 85;
+const BUBBLE_RY = 55;
 
 // Bubble internal text positions (relative to bubble cy).
-const Y_ACCT_NUM = -28;
-const Y_ACCT_TYPE = -8;
+const Y_ACCT_NUM = -30;
+const Y_ACCT_TYPE = -5;
 const Y_BALANCE = +14;
 const Y_DATE = +32;
 
@@ -153,15 +153,15 @@ const COL_RIGHT = 652;
 // Qualified rows. Default two per side (top + bottom). Optional 3rd
 // slot at the row-mid y sits beside the client oval — used only when
 // a household has 5–6 retirement accounts on one side.
-const QUAL_ROW_TOP = 220;
+const QUAL_ROW_TOP = 250;
 const QUAL_ROW_MID = 305;
-const QUAL_ROW_BOT = 390;
+const QUAL_ROW_BOT = 410;
 
 // Non-Qualified rows — three per side stacked. The middle row sits at
 // the trust's vertical center but in the side columns clear of it.
-const NQ_ROW_TOP = 600;
+const NQ_ROW_TOP = 630;
 const NQ_ROW_MID = 700;
-const NQ_ROW_BOT = 800;
+const NQ_ROW_BOT = 820;
 
 // Section corner badges (paired). Y values placed in clear bands above
 // each section's bubble row 1 so the badges aren't hidden under the
@@ -175,10 +175,10 @@ const RET_DIVIDER_Y = 470;
 // Liabilities table position — below NQ row 3 with breathing room.
 const LIAB_TABLE_W = 440;
 const LIAB_TABLE_X = (CANVAS_W - LIAB_TABLE_W) / 2;
-const LIAB_TABLE_Y = 860;
+const LIAB_TABLE_Y = 880;
 
 // NON RETIREMENT TOTAL centered badge.
-const NQ_TOTAL_BADGE_Y = 940;
+const NQ_TOTAL_BADGE_Y = 960;
 
 // =============================================================================
 // Slot grids
@@ -333,7 +333,7 @@ function bubbleContent(b: TccBubble, anchor: CircleAnchor): string {
     `<text x="${cx}" y="${cy + Y_ACCT_NUM}" text-anchor="middle" dominant-baseline="middle" font-size="${FONT_ACCT}" fill="${C_INK_MUTED}" letter-spacing="0.4">${acctNumLine}</text>`,
   );
   lines.push(
-    `<line x1="${cx - 36}" y1="${cy + Y_ACCT_NUM + 6}" x2="${cx + 36}" y2="${cy + Y_ACCT_NUM + 6}" stroke="${C_INK}" stroke-width="0.5"/>`,
+    `<line x1="${cx - 36}" y1="${cy + Y_ACCT_NUM + 12}" x2="${cx + 36}" y2="${cy + Y_ACCT_NUM + 12}" stroke="${C_INK}" stroke-width="0.5"/>`,
   );
   typeLines.forEach((line, i) => {
     lines.push(
