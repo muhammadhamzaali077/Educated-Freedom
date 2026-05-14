@@ -419,12 +419,18 @@ function grandTotalBox(s: TccSnapshot): string {
   const h = 70;
   const x = (CANVAS_W - w) / 2;
   const y = 12;
+  const grandTotalBottom = y + h;
   return `
   <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${C_INK}"/>
   <text x="${PAGE_CENTER_X}" y="${y + 26}" text-anchor="middle" font-size="11" font-weight="500" letter-spacing="0.08em" fill="#FFFFFF">GRAND TOTAL</text>
   <text x="${PAGE_CENTER_X}" y="${y + 56}" text-anchor="middle" class="title num" font-size="22" font-weight="700" fill="#FFFFFF">${escapeXml(fmt(s.totals.grandTotalCents))}</text>
-  <text x="${PAGE_CENTER_X}" y="${y + h + 14}" text-anchor="middle" font-size="11" fill="${C_INK_SOFT}">Liabilities: <tspan class="num" fill="${C_INK_MUTED}" font-weight="500">${escapeXml(fmt(s.totals.liabilitiesTotalCents))}</tspan></text>
-  <text x="${PAGE_CENTER_X}" y="${y + h + 28}" text-anchor="middle" font-size="10" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtLongDate(s.asOfDate))}</text>`;
+
+  <!-- Liabilities pill — light-ivory rounded chip sitting below the Grand Total box -->
+  <g class="liabilities-pill">
+    <rect x="${PAGE_CENTER_X - 75}" y="${grandTotalBottom + 8}" width="150" height="38" rx="3" fill="#F0EAE0" stroke="${C_RULE}" stroke-width="0.5"/>
+    <text x="${PAGE_CENTER_X}" y="${grandTotalBottom + 24}" text-anchor="middle" font-size="12" font-weight="600" fill="${C_INK}">Liabilities: <tspan class="num">${escapeXml(fmt(s.totals.liabilitiesTotalCents))}</tspan></text>
+    <text x="${PAGE_CENTER_X}" y="${grandTotalBottom + 39}" text-anchor="middle" font-size="10" font-style="italic" fill="${C_INK_MUTED}">a/o ${escapeXml(fmtLongDate(s.asOfDate))}</text>
+  </g>`;
 }
 
 // =============================================================================
@@ -504,7 +510,13 @@ function liabilitiesTable(liabs: TccLiability[], x: number, y: number, w: number
 // Permanent disclaimer (Phase 33: always rendered)
 // =============================================================================
 function disclaimerFooter(): string {
-  return `<text x="${CANVAS_W - 16}" y="${CANVAS_H - 14}" text-anchor="end" font-size="10" font-style="italic" fill="${C_DANGER}">* Indicates we do not have up to date information</text>`;
+  const badgeX = 286;
+  const badgeW = 220;
+  const badgeY = NQ_TOTAL_BADGE_Y;
+  return `<g class="disclaimer-legend">
+    <rect x="${badgeX + badgeW + 40}" y="${badgeY + 4}" width="240" height="22" rx="2" fill="#FFFFFF" stroke="${C_DANGER}" stroke-width="0.8"/>
+    <text x="${badgeX + badgeW + 160}" y="${badgeY + 18}" text-anchor="middle" font-size="9" font-weight="500" fill="${C_DANGER}">* Indicates we do not have up to date information</text>
+  </g>`;
 }
 
 // =============================================================================
