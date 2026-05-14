@@ -144,26 +144,28 @@ const ActionItems: FC<{ p: ReportDetailProps }> = ({ p }) => {
           View in Canva &rarr;
         </a>
       ) : null}
-      <button
-        type="button"
-        id="edit-layout-toggle"
-        class="action-button edit-layout-toggle"
-        aria-pressed="false"
-      >
-        Edit layout
-      </button>
-      {/* Reset is hidden in view mode; only revealed when the page enters
-          edit mode (CSS rule on [data-edit-mode="on"] .report-detail-reset). */}
-      <button
-        type="button"
-        class="action-button-muted report-detail-reset"
-        hx-delete={`/clients/${p.clientId}/layouts/${p.reportType}?reportId=${p.reportId}`}
-        hx-target={`#report-canvas-${p.reportId}`}
-        hx-swap="outerHTML"
-        hx-confirm="Reset to default layout? Saved positions for this client + report type will be cleared."
-      >
-        Reset to default layout
-      </button>
+      {p.reportType !== 'TCC' && (
+        <button
+          type="button"
+          id="edit-layout-toggle"
+          class="action-button edit-layout-toggle"
+          aria-pressed="false"
+        >
+          Edit layout
+        </button>
+      )}
+      {p.reportType !== 'TCC' && (
+        <button
+          type="button"
+          class="action-button-muted report-detail-reset"
+          hx-delete={`/clients/${p.clientId}/layouts/${p.reportType}?reportId=${p.reportId}`}
+          hx-target={`#report-canvas-${p.reportId}`}
+          hx-swap="outerHTML"
+          hx-confirm="Reset to default layout? Saved positions for this client + report type will be cleared."
+        >
+          Reset to default layout
+        </button>
+      )}
     </>
   );
 };

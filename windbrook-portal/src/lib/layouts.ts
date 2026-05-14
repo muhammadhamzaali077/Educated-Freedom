@@ -44,33 +44,21 @@ export function defaultTccAssignments(accounts: AccountRow[]): Record<string, st
       a.accountClass === 'private_reserve',
   );
 
-  // Phase 33 slot grid — 3 slots per side per section, six total per
-  // section. Fill top → bottom on each side. Bubble at (140, 200) for
-  // qualified-left-1, (140, 370) for qualified-left-2, (140, 285) beside
-  // the central client oval for qualified-left-3 (used only when a
-  // household has 5+ retirement accounts on one side).
-  const QUAL_LEFT_FILL = ['qualified-left-1', 'qualified-left-2', 'qualified-left-3'];
-  const QUAL_RIGHT_FILL = ['qualified-right-1', 'qualified-right-2', 'qualified-right-3'];
-
-  // Non-Qualified — alternate left/right starting top so a 3-account
-  // household fills both top corners + one mid-left, looking balanced.
-  const NQ_FILL_ORDER = [
-    'non-qualified-left-1',
-    'non-qualified-right-1',
-    'non-qualified-left-2',
-    'non-qualified-right-2',
-    'non-qualified-left-3',
-    'non-qualified-right-3',
-  ];
-
-  p1Ret.slice(0, QUAL_LEFT_FILL.length).forEach((a, i) => {
-    out[a.id] = QUAL_LEFT_FILL[i] as string;
+  // Phase 43 — slotId now records only side. The TCC renderer reads the
+  // slotId's side prefix ("qualified-left" / "qualified-right" / etc.) and
+  // distributes accounts across a column zone with distributeBubbles().
+  // The numeric suffix is preserved for legacy callers (the layout-editor
+  // and saved-layout migration paths) but no longer drives positioning.
+  p1Ret.forEach((a, i) => {
+    out[a.id] = `qualified-left-${i + 1}`;
   });
-  p2Ret.slice(0, QUAL_RIGHT_FILL.length).forEach((a, i) => {
-    out[a.id] = QUAL_RIGHT_FILL[i] as string;
+  p2Ret.forEach((a, i) => {
+    out[a.id] = `qualified-right-${i + 1}`;
   });
-  nonRet.slice(0, NQ_FILL_ORDER.length).forEach((a, i) => {
-    out[a.id] = NQ_FILL_ORDER[i] as string;
+  nonRet.forEach((a, i) => {
+    const side = i % 2 === 0 ? 'left' : 'right';
+    const indexOnSide = Math.floor(i / 2) + 1;
+    out[a.id] = `non-qualified-${side}-${indexOnSide}`;
   });
 
   return out;

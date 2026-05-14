@@ -118,7 +118,7 @@ export interface RenderOptions {
 // Canvas + section geometry
 // =============================================================================
 const CANVAS_W = 792;
-const CANVAS_H = 1020;
+const CANVAS_H = 1130;
 const PAGE_CENTER_X = CANVAS_W / 2;
 
 // Account bubbles: 170 × 110 (rx=85, ry=55). Smaller than central bubbles.
@@ -150,18 +150,36 @@ const TRUST_OVAL_CY = 700;
 const COL_LEFT = 140;
 const COL_RIGHT = 652;
 
-// Qualified rows. Default two per side (top + bottom). Optional 3rd
-// slot at the row-mid y sits beside the client oval — used only when
-// a household has 5–6 retirement accounts on one side.
+// Legacy slot rows — kept so DEFAULT_TCC_LAYOUT still type-checks for
+// any code path that still asks for a slot grid. The new render flow
+// uses COLUMN_ZONES + distributeBubbles instead.
 const QUAL_ROW_TOP = 250;
 const QUAL_ROW_MID = 305;
 const QUAL_ROW_BOT = 410;
-
-// Non-Qualified rows — three per side stacked. The middle row sits at
-// the trust's vertical center but in the side columns clear of it.
 const NQ_ROW_TOP = 630;
-const NQ_ROW_MID = 700;
-const NQ_ROW_BOT = 820;
+const NQ_ROW_MID = 760;
+const NQ_ROW_BOT = 890;
+
+// Phase 43 — column zones replace fixed slot rows for rendering. Each
+// column gets a vertical band; distributeBubbles() fans N accounts into
+// that band with min-20px gaps, shrinking ry down to a floor of 35 when
+// needed.
+interface ColumnZone {
+  cx: number;
+  yTop: number;
+  yBottom: number;
+  bubbleRx: number;
+  bubbleRy: number;
+}
+
+// QUAL zone runs from just under the QUALIFIED badge (badge bot = 166)
+// down to just above the RETIREMENT ONLY divider (divider top = 470).
+// NQ zone runs from just under the NON-QUALIFIED badge (badge bot = 546)
+// down to just above the Liabilities pill (LIAB_TABLE_Y = 965).
+const QUAL_ZONE_Y_TOP = 170;
+const QUAL_ZONE_Y_BOTTOM = 465;
+const NQ_ZONE_Y_TOP = 566;
+const NQ_ZONE_Y_BOTTOM = 945;
 
 // Section corner badges (paired). Y values placed in clear bands above
 // each section's bubble row 1 so the badges aren't hidden under the
@@ -175,10 +193,94 @@ const RET_DIVIDER_Y = 470;
 // Liabilities table position — below NQ row 3 with breathing room.
 const LIAB_TABLE_W = 440;
 const LIAB_TABLE_X = (CANVAS_W - LIAB_TABLE_W) / 2;
-const LIAB_TABLE_Y = 880;
+const LIAB_TABLE_Y = 965;
 
 // NON RETIREMENT TOTAL centered badge.
-const NQ_TOTAL_BADGE_Y = 960;
+const NQ_TOTAL_BADGE_Y = 1075;
+
+const COLUMN_ZONES: Record<string, ColumnZone> = {
+  'qualified-left': {
+    cx: COL_LEFT,
+    yTop: QUAL_ZONE_Y_TOP,
+    yBottom: QUAL_ZONE_Y_BOTTOM,
+    bubbleRx: BUBBLE_RX,
+    bubbleRy: BUBBLE_RY,
+  },
+  'qualified-right': {
+    cx: COL_RIGHT,
+    yTop: QUAL_ZONE_Y_TOP,
+    yBottom: QUAL_ZONE_Y_BOTTOM,
+    bubbleRx: BUBBLE_RX,
+    bubbleRy: BUBBLE_RY,
+  },
+  'non-qualified-left': {
+    cx: COL_LEFT,
+    yTop: NQ_ZONE_Y_TOP,
+    yBottom: NQ_ZONE_Y_BOTTOM,
+    bubbleRx: BUBBLE_RX,
+    bubbleRy: BUBBLE_RY,
+  },
+  'non-qualified-right': {
+    cx: COL_RIGHT,
+    yTop: NQ_ZONE_Y_TOP,
+    yBottom: NQ_ZONE_Y_BOTTOM,
+    bubbleRx: BUBBLE_RX,
+    bubbleRy: BUBBLE_RY,
+  },
+};
+
+interface DistributedBubble {
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  /** True when the column packs >=4 bubbles. The bubble renderer drops the
+   * Acct # and a/o-date lines on compact bubbles so the Name + Value have
+   * room to breathe at small ry. Also drives the wider rx (90 vs 85) and
+   * the relaxed ry floor (30 vs 35). */
+  compact: boolean;
+}
+
+function distributeBubbles(zone: ColumnZone, count: number): DistributedBubble[] {
+  if (count === 0) return [];
+
+  const availableHeight = zone.yBottom - zone.yTop;
+  const minGap = 20;
+  const dense = count >= 4;
+  // Dense columns use a wider rx and a lower ry floor — long-narrow ellipses
+  // read as distinct ovals even when packed tightly. Min gap floor at 12 keeps
+  // ~12px of breathing room between adjacent ellipses in the densest case.
+  const ryFloor = dense ? 30 : 35;
+  const actualRx = dense ? 90 : zone.bubbleRx;
+  const gapFloor = 12;
+
+  let actualRy = zone.bubbleRy;
+  let actualGap = minGap;
+
+  const requiredHeight = count * actualRy * 2 + (count - 1) * minGap;
+  if (requiredHeight > availableHeight) {
+    const totalGapSpace = (count - 1) * minGap;
+    const remainingForBubbles = availableHeight - totalGapSpace;
+    actualRy = Math.max(ryFloor, remainingForBubbles / (count * 2));
+
+    if (actualRy === ryFloor) {
+      const totalBubbleSpace = count * ryFloor * 2;
+      const remainingForGaps = availableHeight - totalBubbleSpace;
+      actualGap = count > 1 ? Math.max(gapFloor, remainingForGaps / (count - 1)) : minGap;
+    }
+  }
+
+  const totalStackHeight = count * actualRy * 2 + (count - 1) * actualGap;
+  const startY = zone.yTop + (availableHeight - totalStackHeight) / 2 + actualRy;
+
+  return Array.from({ length: count }, (_, i) => ({
+    cx: zone.cx,
+    cy: startY + i * (actualRy * 2 + actualGap),
+    rx: actualRx,
+    ry: actualRy,
+    compact: dense,
+  }));
+}
 
 // =============================================================================
 // Slot grids
@@ -318,37 +420,74 @@ export function splitAccountName(name: string): string[] {
 // =============================================================================
 // Account bubble (ellipse with internal text)
 // =============================================================================
-function bubbleContent(b: TccBubble, anchor: CircleAnchor): string {
-  const { cx, cy } = anchor;
-  const acctNumLine = b.accountNumberLastFour
-    ? `Acct # &#8226;&#8226;${escapeXml(b.accountNumberLastFour)}`
-    : 'Acct #';
+function bubbleContent(b: TccBubble, pos: DistributedBubble): string {
+  const { cx, cy, rx, ry, compact } = pos;
+  // Scale fonts + offsets to the actual ry. Clamped at 1.0 so anything at or
+  // above the default BUBBLE_RY renders unchanged (Cole/Lipski never shrink).
+  const scale = Math.min(1, ry / BUBBLE_RY);
   const typeLines = splitAccountName(b.accountType);
-  const wrapShift = (typeLines.length - 1) * 11;
+  const typeLineHeight = 11 * scale;
+  const wrapShift = (typeLines.length - 1) * typeLineHeight;
 
   const section = slotIdToSection(b.slotId);
   const lines: string[] = [];
 
-  lines.push(
-    `<text x="${cx}" y="${cy + Y_ACCT_NUM}" text-anchor="middle" dominant-baseline="middle" font-size="${FONT_ACCT}" fill="${C_INK_MUTED}" letter-spacing="0.4">${acctNumLine}</text>`,
-  );
-  lines.push(
-    `<line x1="${cx - 36}" y1="${cy + Y_ACCT_NUM + 12}" x2="${cx + 36}" y2="${cy + Y_ACCT_NUM + 12}" stroke="${C_INK}" stroke-width="0.5"/>`,
-  );
-  typeLines.forEach((line, i) => {
+  if (compact) {
+    // Dense column (count >= 4). Drop Acct # + hairline + a/o-date so the
+    // Name and Value have proper room at small ry. Source fonts are slightly
+    // bumped (13/15 vs 11/14) because the wider rx=90 ellipse gives more
+    // horizontal space and the scale factor will pull them back down.
+    const fontType = 13 * scale;
+    const fontBalance = 15 * scale;
+    const yType = cy - ry * 0.2;
+    const yBalance = cy + ry * 0.3;
+    typeLines.forEach((line, i) => {
+      lines.push(
+        `<text x="${cx}" y="${yType + i * typeLineHeight}" text-anchor="middle" dominant-baseline="middle" font-size="${fontType}" font-weight="500" fill="${C_INK}">${escapeXml(line)}</text>`,
+      );
+    });
     lines.push(
-      `<text x="${cx}" y="${cy + Y_ACCT_TYPE + i * 11}" text-anchor="middle" dominant-baseline="middle" font-size="${FONT_TYPE}" font-weight="500" fill="${C_INK}">${escapeXml(line)}</text>`,
+      `<text x="${cx}" y="${yBalance + wrapShift}" text-anchor="middle" dominant-baseline="middle" class="title num" font-size="${fontBalance}" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(b.balanceCents, b.isStale)}</text>`,
     );
-  });
-  lines.push(
-    `<text x="${cx}" y="${cy + Y_BALANCE + wrapShift}" text-anchor="middle" dominant-baseline="middle" class="title num" font-size="${FONT_BALANCE}" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(b.balanceCents, b.isStale)}</text>`,
-  );
-  lines.push(
-    `<text x="${cx}" y="${cy + Y_DATE + wrapShift}" text-anchor="middle" dominant-baseline="middle" font-size="${FONT_DATE}" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtShortDate(b.asOfDate))}</text>`,
-  );
+  } else {
+    // Standard 4-line bubble. Offsets are scaled by ry/BUBBLE_RY so at
+    // ry=55 they reproduce the exact hardcoded values; at ry=42.5 (3-bubble
+    // shrink case) they tighten proportionally.
+    const acctNumLine = b.accountNumberLastFour
+      ? `Acct # &#8226;&#8226;${escapeXml(b.accountNumberLastFour)}`
+      : 'Acct #';
+    const offsetScale = ry / BUBBLE_RY;
+    const yAcct = cy + Y_ACCT_NUM * offsetScale;
+    const yType = cy + Y_ACCT_TYPE * offsetScale;
+    const yBalance = cy + Y_BALANCE * offsetScale;
+    const yDate = cy + Y_DATE * offsetScale;
+    const hairlineY = yAcct + 12 * scale;
+    const fontAcct = FONT_ACCT * scale;
+    const fontType = FONT_TYPE * scale;
+    const fontBalance = FONT_BALANCE * scale;
+    const fontDate = FONT_DATE * scale;
 
-  return `<g class="bubble" data-account-id="${escapeXml(b.accountId)}" data-slot-id="${escapeXml(b.slotId)}" data-section="${section}" data-cx="${cx}" data-cy="${cy}" data-rx="${BUBBLE_RX}" data-ry="${BUBBLE_RY}" data-account-type="${escapeXml(b.accountType)}" data-institution="${escapeXml(b.institution ?? '')}" data-acct-last4="${escapeXml(b.accountNumberLastFour ?? '')}" data-asof="${escapeXml(fmtShortDate(b.asOfDate))}">
-  <ellipse class="bubble-ring" cx="${cx}" cy="${cy}" rx="${BUBBLE_RX}" ry="${BUBBLE_RY}" fill="#FFFFFF" stroke="${C_INK}" stroke-width="1.4"/>
+    lines.push(
+      `<text x="${cx}" y="${yAcct}" text-anchor="middle" dominant-baseline="middle" font-size="${fontAcct}" fill="${C_INK_MUTED}" letter-spacing="0.4">${acctNumLine}</text>`,
+    );
+    lines.push(
+      `<line x1="${cx - 36}" y1="${hairlineY}" x2="${cx + 36}" y2="${hairlineY}" stroke="${C_INK}" stroke-width="0.5"/>`,
+    );
+    typeLines.forEach((line, i) => {
+      lines.push(
+        `<text x="${cx}" y="${yType + i * typeLineHeight}" text-anchor="middle" dominant-baseline="middle" font-size="${fontType}" font-weight="500" fill="${C_INK}">${escapeXml(line)}</text>`,
+      );
+    });
+    lines.push(
+      `<text x="${cx}" y="${yBalance + wrapShift}" text-anchor="middle" dominant-baseline="middle" class="title num" font-size="${fontBalance}" font-weight="500" fill="${C_NAVY_DEEP}">${moneyTspan(b.balanceCents, b.isStale)}</text>`,
+    );
+    lines.push(
+      `<text x="${cx}" y="${yDate + wrapShift}" text-anchor="middle" dominant-baseline="middle" font-size="${fontDate}" font-style="italic" fill="${C_INK_SOFT}">a/o ${escapeXml(fmtShortDate(b.asOfDate))}</text>`,
+    );
+  }
+
+  return `<g class="bubble" data-account-id="${escapeXml(b.accountId)}" data-slot-id="${escapeXml(b.slotId)}" data-section="${section}" data-cx="${cx}" data-cy="${cy}" data-rx="${rx}" data-ry="${ry}" data-account-type="${escapeXml(b.accountType)}" data-institution="${escapeXml(b.institution ?? '')}" data-acct-last4="${escapeXml(b.accountNumberLastFour ?? '')}" data-asof="${escapeXml(fmtShortDate(b.asOfDate))}">
+  <ellipse class="bubble-ring" cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="#FFFFFF" stroke="${C_INK}" stroke-width="1.4"/>
   ${lines.join('\n  ')}
 </g>`;
 }
@@ -549,88 +688,36 @@ export function renderTccSvg(
   layout: TccBubbleLayout = DEFAULT_TCC_LAYOUT,
   _options: RenderOptions = {},
 ): { page1: string } {
-  // Self-healing slot remap. If a saved layout pins a bubble to a slot
-  // that's missing from the current grid (e.g. old `p1-*` / `nr-*` IDs
-  // from before Phase 33), find the next free default slot for the
-  // bubble's side. Side hint comes from the saved slotId prefix.
-  const QUAL_LEFT_FILL = ['qualified-left-1', 'qualified-left-2', 'qualified-left-3'];
-  const QUAL_RIGHT_FILL = ['qualified-right-1', 'qualified-right-2', 'qualified-right-3'];
-  const QUAL_DEFAULT_FILL = [...QUAL_LEFT_FILL, ...QUAL_RIGHT_FILL];
+  // Phase 43 — column-zone distribution. Bubbles are partitioned by
+  // slotId prefix into four columns (the snapshot builder already routes
+  // Person 1 → qualified-left, Person 2 → qualified-right, and alternates
+  // non-retirement L/R), then distributeBubbles fans them vertically.
+  function sideOf(slotId: string, fallbackOdd: boolean): 'left' | 'right' {
+    if (slotId.includes('-right')) return 'right';
+    if (slotId.includes('-left')) return 'left';
+    return fallbackOdd ? 'right' : 'left';
+  }
 
-  const retPlaced = (() => {
-    const used = new Set<string>();
-    const items = s.retirementBubbles.map((b) => {
-      const a = layout.retirementSlots[b.slotId];
-      if (a) {
-        used.add(b.slotId);
-        return { bubble: b, anchor: a };
-      }
-      return { bubble: b, anchor: null as CircleAnchor | null };
-    });
-    for (const item of items) {
-      if (item.anchor !== null) continue;
-      // Side hint: old `p1-` → left, `p2-` → right, new `qualified-left-` → left, etc.
-      const side =
-        item.bubble.slotId.startsWith('p2-') || item.bubble.slotId.startsWith('qualified-right-')
-          ? 'right'
-          : item.bubble.slotId.startsWith('p1-') || item.bubble.slotId.startsWith('qualified-left-')
-            ? 'left'
-            : 'either';
-      const order =
-        side === 'left'
-          ? [...QUAL_LEFT_FILL, ...QUAL_RIGHT_FILL]
-          : side === 'right'
-            ? [...QUAL_RIGHT_FILL, ...QUAL_LEFT_FILL]
-            : QUAL_DEFAULT_FILL;
-      const free = order.find((slot) => !used.has(slot) && layout.retirementSlots[slot]);
-      if (free) {
-        item.anchor = layout.retirementSlots[free]!;
-        used.add(free);
-      }
-    }
-    return items;
-  })();
+  const retLeft = s.retirementBubbles.filter((b, i) => sideOf(b.slotId, i % 2 === 1) === 'left');
+  const retRight = s.retirementBubbles.filter((b, i) => sideOf(b.slotId, i % 2 === 1) === 'right');
+  const nqLeft = s.nonRetirementBubbles.filter(
+    (b, i) => sideOf(b.slotId, i % 2 === 1) === 'left',
+  );
+  const nqRight = s.nonRetirementBubbles.filter(
+    (b, i) => sideOf(b.slotId, i % 2 === 1) === 'right',
+  );
 
-  const NQ_DEFAULT_FILL = [
-    'non-qualified-left-1',
-    'non-qualified-right-1',
-    'non-qualified-left-2',
-    'non-qualified-right-2',
-    'non-qualified-left-3',
-    'non-qualified-right-3',
-  ];
+  const renderColumn = (bubbles: TccBubble[], zoneKey: string): string => {
+    const zone = COLUMN_ZONES[zoneKey];
+    if (!zone) return '';
+    const positions = distributeBubbles(zone, bubbles.length);
+    return bubbles.map((b, i) => bubbleContent(b, positions[i]!)).join('');
+  };
 
-  const nqPlaced = (() => {
-    const used = new Set<string>();
-    const items = s.nonRetirementBubbles.map((b) => {
-      const a = layout.nonRetirementSlots[b.slotId];
-      if (a) {
-        used.add(b.slotId);
-        return { bubble: b, anchor: a };
-      }
-      return { bubble: b, anchor: null as CircleAnchor | null };
-    });
-    for (const item of items) {
-      if (item.anchor !== null) continue;
-      const free = NQ_DEFAULT_FILL.find(
-        (slot) => !used.has(slot) && layout.nonRetirementSlots[slot],
-      );
-      if (free) {
-        item.anchor = layout.nonRetirementSlots[free]!;
-        used.add(free);
-      }
-    }
-    return items;
-  })();
-
-  const retBubbles = retPlaced
-    .filter((item) => item.anchor !== null)
-    .map((item) => bubbleContent(item.bubble, item.anchor!))
-    .join('');
-  const nqBubbles = nqPlaced
-    .filter((item) => item.anchor !== null)
-    .map((item) => bubbleContent(item.bubble, item.anchor!))
-    .join('');
+  const retBubbles =
+    renderColumn(retLeft, 'qualified-left') + renderColumn(retRight, 'qualified-right');
+  const nqBubbles =
+    renderColumn(nqLeft, 'non-qualified-left') + renderColumn(nqRight, 'non-qualified-right');
 
   const retirementSubtotal = s.totals.p1RetirementCents + s.totals.p2RetirementCents;
   const nonRetirementSubtotal = s.totals.nonRetirementCents + s.totals.trustCents;
@@ -648,7 +735,6 @@ export function renderTccSvg(
        bands above the bubble rows so they aren't hidden by ellipses. -->
   ${cornerBadgePair('QUALIFIED', QUAL_BADGE_Y)}
   ${clientOval(layout.clientOval, s.persons)}
-  ${slotIndicators(layout)}
   ${retBubbles}
 
   <!-- Retirement Only divider -->
